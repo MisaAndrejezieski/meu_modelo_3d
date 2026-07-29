@@ -4,22 +4,21 @@ import sys
 
 
 def main():
-    # Apontamos para o gradio_app.py
     app_path = os.path.join("gradio_app.py")
     
     if not os.path.exists(app_path):
         print("Erro: gradio_app.py não encontrado!")
         return
 
-    print("🚀 Iniciando o conversor 3D no seu navegador...")
-    print("🔗 Aguarde...\n")
+    print("🚀 Iniciando o conversor 3D...")
+    print("🔗 Aguarde o download do modelo correto (1.7GB)...\n")
 
-    # CORREÇÃO: Forçamos o caminho para a pasta atual e usamos --trust-remote-code para garantir a segurança
+    # CORREÇÃO: Usamos o ID oficial do modelo no Hugging Face (isso garante que ele baixe a versão certa)
     comando = [
         sys.executable, 
         app_path, 
         "--device", "cpu", 
-        "--pretrained-model-name-or-path", ".", 
+        "--pretrained-model-name-or-path", "stabilityai/TripoSR",
         "--trust-remote-code"
     ]
     
