@@ -3,7 +3,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from torchmcubes import marching_cubes
+#from torchmcubes import marching_cubes
 
 
 class IsosurfaceHelper(nn.Module):
