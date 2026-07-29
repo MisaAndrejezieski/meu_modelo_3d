@@ -4,22 +4,21 @@ import sys
 
 
 def main():
-    # Simplesmente chama o arquivo que está na mesma pasta agora
     app_path = os.path.join("gradio_app.py")
     
     if not os.path.exists(app_path):
-        print("Erro: gradio_app.py não encontrado! Verifique se você colou a pasta TripoSR corretamente.")
+        print("Erro: gradio_app.py não encontrado!")
         return
 
-    print("🚀 Iniciando o conversor 3D...")
-    print("🔗 Aguarde o download do modelo...\n")
+    print("🚀 Iniciando o conversor 3D (Modo Forçado)...")
+    print("🔗 Espere o download do modelo original de 1.7GB...\n")
 
+    # Caminho oficial do modelo na nuvem
     comando = [
         sys.executable, 
         app_path, 
         "--device", "cpu", 
-        "--pretrained-model-name-or-path", "stabilityai/TripoSR",
-        "--trust-remote-code"
+        "--pretrained-model-name-or-path", "stabilityai/TripoSR"
     ]
     
     try:
