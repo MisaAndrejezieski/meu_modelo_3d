@@ -3,7 +3,17 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from torchmcubes import marching_cubes
+
+try:
+    from torchmcubes import marching_cubes
+except ImportError:
+    from skimage import measure
+
+    def marching_cubes(volume, level):
+        if not isinstance(volume, np.ndarray):
+            volume = volume.cpu().numpy()
+        verts, faces, _, _ = measure.marching_cubes(volume, level)
+        return verts.astype(np.float32), faces.astype(np.int64)
 
 
 class IsosurfaceHelper(nn.Module):
@@ -42,11 +52,7 @@ class MarchingCubeHelper(IsosurfaceHelper):
         level: torch.FloatTensor,
     ) -> Tuple[torch.FloatTensor, torch.LongTensor]:
         level = -level.view(self.resolution, self.resolution, self.resolution)
-        try:
-            v_pos, t_pos_idx = self.mc_func(level.detach(), 0.0)
-        except AttributeError:
-            print("torchmcubes was not compiled with CUDA support, use CPU version instead.")
-            v_pos, t_pos_idx = self.mc_func(level.detach().cpu(), 0.0)
+        v_pos, t_pos_idx = self.mc_func(level.detach(), 0.0)
         v_pos = v_pos[..., [2, 1, 0]]
         v_pos = v_pos / (self.resolution - 1.0)
         return v_pos.to(level.device), t_pos_idx.to(level.device)
