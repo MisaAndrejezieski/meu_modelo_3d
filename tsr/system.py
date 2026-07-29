@@ -14,13 +14,8 @@ from omegaconf import OmegaConf
 from PIL import Image
 
 from .models.isosurface import MarchingCubeHelper
-from .utils import (
-    BaseModule,
-    ImagePreprocessor,
-    find_class,
-    get_spherical_cameras,
-    scale_tensor,
-)
+from .utils import (BaseModule, ImagePreprocessor, find_class,
+                    get_spherical_cameras, scale_tensor)
 
 
 class TSR(BaseModule):
@@ -67,7 +62,12 @@ class TSR(BaseModule):
         OmegaConf.resolve(cfg)
         model = cls(cfg)
         ckpt = torch.load(weight_path, map_location="cpu")
-        model.load_state_dict(ckpt)
+        if isinstance(ckpt, dict):
+            if "state_dict" in ckpt:
+                ckpt = ckpt["state_dict"]
+            if any(k.startswith("model.") for k in ckpt.keys()):
+                ckpt = {k[len("model.") :]: v for k, v in ckpt.items()}
+        model.load_state_dict(ckpt, strict=False)
         return model
 
     def configure(self):
