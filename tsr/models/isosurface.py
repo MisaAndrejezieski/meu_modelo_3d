@@ -65,4 +65,3 @@ class MarchingCubeHelper(IsosurfaceHelper):
         v_pos = v_pos[..., [2, 1, 0]]
         v_pos = v_pos / (self.resolution - 1.0)
         return v_pos.to(level.device), t_pos_idx.to(level.device)
-    
