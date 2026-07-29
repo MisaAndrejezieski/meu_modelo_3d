@@ -162,10 +162,3 @@ cython_debug/
 # default output directory
 output/
 outputs/
-
-# Modelos de IA pesados (Não enviar para o GitHub)
-*.ckpt
-*.pth
-*.safetensors
-*.bin
-*.pt
