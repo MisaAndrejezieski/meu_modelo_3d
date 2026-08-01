@@ -31,7 +31,7 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           canvas.width = cols;
           canvas.height = rows;
 
-          // Aplica Blur leve para suavizar as arestas e criar rampas na usinagem
+          // Suavização leve para evitar picos na malha
           ctx.filter = 'blur(2px)';
           ctx.drawImage(img, 0, 0, cols, rows);
 
@@ -51,16 +51,19 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
             const g = data[pixelIndex + 1];
             const b = data[pixelIndex + 2];
             
-            // Calcula a luminância da imagem
             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
             
-            // CORREÇÃO DE VOLUME: Zera o fundo claro (>= 0.92) e eleva as partes preenchidas
+            // CORREÇÃO DE VOLUME CORRETO (RELEVO POSITIVO):
+            // O fundo branco (luminance próximo de 1.0) deve ser Z = 0 (base plana).
+            // Queremos que áreas com cor/conteúdo ganhem altura positiva. 
+            // Usamos diretamente o inverso do branco para empurrar o relevo para cima:
             let z = 0;
-            if (luminance < 0.92) {
+            if (luminance < 0.95) { // Tudo que não for o fundo branco puro ganha volume
+              // Quanto mais denso/colorido, maior o relevo (limitado ao maxDepthMm)
               const intensity = 1.0 - luminance;
-              z = Math.pow(intensity, 1.5) * maxDepthMm;
+              z = intensity * maxDepthMm; 
             } else {
-              z = 0; // Fundo perfeitamente plano
+              z = 0; // Fundo estritamente plano na base
             }
 
             positions.setZ(i, z);
@@ -69,7 +72,7 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           geometry.computeVertexNormals();
 
           const material = new THREE.MeshStandardMaterial({
-            color: 0xd69e2e, // Tom amadeirado elegante para preview
+            color: 0xd69e2e,
             roughness: 0.4,
             metalness: 0.1,
             side: THREE.DoubleSide,
