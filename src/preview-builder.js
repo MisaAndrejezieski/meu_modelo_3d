@@ -2,7 +2,6 @@ import * as THREE from 'three';
 
 export function buildSVGPreview(file, widthMm, cutDepth) {
   return new Promise((resolve) => {
-    // Mantido estruturado para SVG (poderá ser integrado com SVGLoader posteriormente)
     const group = new THREE.Group();
     const geometry = new THREE.BoxGeometry(widthMm, widthMm * 0.75, cutDepth);
     const material = new THREE.MeshStandardMaterial({ color: 0x4a5568, roughness: 0.5 });
@@ -32,7 +31,7 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           canvas.width = cols;
           canvas.height = rows;
 
-          // CORREÇÃO CRUCIAL ANTI-PICOS: Aplica Blur para suavizar as arestas e criar rampas
+          // Aplica Blur leve para suavizar as arestas e criar rampas na usinagem
           ctx.filter = 'blur(2px)';
           ctx.drawImage(img, 0, 0, cols, rows);
 
@@ -52,11 +51,18 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
             const g = data[pixelIndex + 1];
             const b = data[pixelIndex + 2];
             
-            // Luminância padrão corrigida
+            // Calcula a luminância da imagem
             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
             
-            // Inverte para que partes escuras afundem suavemente ou fiquem na proporção correta
-            const z = (1.0 - luminance) * maxDepthMm;
+            // CORREÇÃO DE VOLUME: Zera o fundo claro (>= 0.92) e eleva as partes preenchidas
+            let z = 0;
+            if (luminance < 0.92) {
+              const intensity = 1.0 - luminance;
+              z = Math.pow(intensity, 1.5) * maxDepthMm;
+            } else {
+              z = 0; // Fundo perfeitamente plano
+            }
+
             positions.setZ(i, z);
           }
 
