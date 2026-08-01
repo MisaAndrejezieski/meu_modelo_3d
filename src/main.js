@@ -4,8 +4,8 @@ import './style.css';
 
 /**
  * @class LithophaneApp
- * @description Aplicação WebGL para geração de Lithophanes e Bas-Relief 3D
- * com pré-processamento de imagens e fatiador G-Code integrado.
+ * @description Aplicação WebGL profissional para conversão de imagens 2D / Lineart 
+ * em relevo tridimensional (Bas-Relief) e fatiamento algorítmico em G-Code (ISO 6983).
  */
 class LithophaneApp {
   constructor() {
@@ -19,7 +19,7 @@ class LithophaneApp {
   }
 
   /**
-   * Configura o cenário 3D, câmera, renderizador WebGL e iluminação.
+   * Inicializa o ambiente 3D: Câmera, Renderizador WebGL e Sistema de Luzes Triangulado
    */
   initScene() {
     this.scene = new THREE.Scene();
@@ -41,25 +41,25 @@ class LithophaneApp {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
 
-    // Iluminação Triangulada para destacar os relevos do modelo
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    // Iluminação Profissional para destacar relevos escultóricos
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     
-    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    mainLight.position.set(40, -40, 80);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.3);
+    keyLight.position.set(50, -50, 80);
 
-    const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.5);
-    fillLight.position.set(-40, 40, 50);
+    const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.4);
+    fillLight.position.set(-50, 50, 50);
 
-    this.scene.add(ambientLight, mainLight, fillLight);
+    this.scene.add(ambientLight, keyLight, fillLight);
 
-    // Grid para simulação do Bed de Impressão (200x200 mm)
+    // Simulação Visual da Mesa de Impressão (Bed 200x200 mm)
     const gridHelper = new THREE.GridHelper(200, 40, 0x38bdf8, 0x334155);
     gridHelper.rotation.x = Math.PI / 2;
     this.scene.add(gridHelper);
   }
 
   /**
-   * Associa eventos do DOM aos métodos da aplicação.
+   * Conecta a Interface do Usuário (DOM) com a lógica da aplicação
    */
   initListeners() {
     document.getElementById('image-input').addEventListener('change', (e) => this.handleImageUpload(e));
@@ -76,7 +76,7 @@ class LithophaneApp {
   }
 
   /**
-   * Processa o arquivo enviado pelo usuário.
+   * Manipula o carregamento da imagem selecionada pelo usuário
    */
   handleImageUpload(event) {
     const file = event.target.files[0];
@@ -93,12 +93,12 @@ class LithophaneApp {
   }
 
   /**
-   * Aplica tratamento de imagem via Canvas (Filtros + Blur) e gera a Malha 3D.
+   * Processamento Matricial Avançado (Auto-Background + Kernel Filtering + Volumetric Curve)
    */
   generate3DMesh() {
     if (!this.loadedImgElement) return;
 
-    // Limpeza de memória (Evita Memory Leaks de geometrias antigas)
+    // Descarte seguro para evitar vazamento de memória WebGL
     if (this.currentMesh) {
       this.scene.remove(this.currentMesh);
       this.currentMesh.geometry.dispose();
@@ -109,50 +109,88 @@ class LithophaneApp {
     const ctx = canvas.getContext('2d');
 
     const widthMM = parseFloat(document.getElementById('width-input').value) || 80;
-    
-    // Resolução da malha (200 vértices para capturar linhas e detalhes finos)
-    const resX = 200; 
+    const resX = 220; // Alta densidade de malha para contornos suaves
     const resY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * resX);
     const heightMM = (this.loadedImgElement.height / this.loadedImgElement.width) * widthMM;
 
     canvas.width = resX;
     canvas.height = resY;
 
-    // --- PROCESSAMENTO DE IMAGEM (Suavização para Linearts e Desenhos) ---
-    // Aplica Blur Gaussiano no Canvas antes de ler a altura dos vértices
-    ctx.filter = 'blur(1.8px) grayscale(100%)';
+    // 1. Renderiza a imagem inicial em escala de cinza
+    ctx.filter = 'grayscale(100%)';
     ctx.drawImage(this.loadedImgElement, 0, 0, resX, resY);
 
-    const imgData = ctx.getImageData(0, 0, resX, resY).data;
+    const imgData = ctx.getImageData(0, 0, resX, resY);
+    const data = imgData.data;
 
+    // 2. Análise Estatística para Detecção Automática de Fundo (Claro vs Escuro)
+    let totalLum = 0;
+    const sampleStep = 8;
+    let samples = 0;
+    
+    for (let i = 0; i < data.length; i += 4 * sampleStep) {
+      totalLum += (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      samples++;
+    }
+    const isDarkBackground = (totalLum / samples) < 128;
+
+    // 3. Extração e Inversão Inteligente da Matriz de Altura
+    const heightMap = new Float32Array(resX * resY);
+    for (let y = 0; y < resY; y++) {
+      for (let x = 0; x < resX; x++) {
+        const idx = (y * resX + x) * 4;
+        const lum = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) / 255.0;
+        
+        // Garante que o desenho SEMPRE se projete para FORA do fundo
+        heightMap[y * resX + x] = isDarkBackground ? lum : (1.0 - lum);
+      }
+    }
+
+    // 4. Filtro de Suavização por Matriz de Kernel 5x5 (Remoção de Serrilhados)
+    const smoothedMap = new Float32Array(resX * resY);
+    const radius = 2;
+
+    for (let y = 0; y < resY; y++) {
+      for (let x = 0; x < resX; x++) {
+        let sum = 0;
+        let count = 0;
+
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+
+            if (nx >= 0 && nx < resX && ny >= 0 && ny < resY) {
+              sum += heightMap[ny * resX + nx];
+              count++;
+            }
+          }
+        }
+        smoothedMap[y * resX + x] = sum / count;
+      }
+    }
+
+    // 5. Construção da Geometria Tridimensional no Three.js
     const geometry = new THREE.PlaneGeometry(widthMM, heightMM, resX - 1, resY - 1);
     const pos = geometry.attributes.position;
     const maxZ = parseFloat(document.getElementById('height-slider').value);
 
     for (let i = 0; i < pos.count; i++) {
-      const r = imgData[i * 4];
-      const g = imgData[i * 4 + 1];
-      const b = imgData[i * 4 + 2];
+      let rawVal = smoothedMap[i];
 
-      // Cálculo da Luminância (Normalizada de 0.0 a 1.0)
-      const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-      
-      // Inversão: Linhas escuras elevam o relevo (Bas-Relief)
-      let depth = (1 - brightness);
+      // Aplicação da Curva Senoidal para Projeção Anatômica Volumétrica
+      let shapedVal = Math.sin(rawVal * Math.PI * 0.5);
 
-      // Curva Exponencial: Arredonda os picos para visual escultural
-      depth = Math.pow(depth, 1.25);
-
-      // Aplica a altura final Z + espessura base de 0.6mm
-      pos.setZ(i, depth * maxZ + 0.6);
+      // Z final: Elevação + Base sólida de 0.8mm
+      pos.setZ(i, shapedVal * maxZ + 0.8);
     }
 
-    // Recalcula as normais para garantir um sombreamento suave das superfícies
     geometry.computeVertexNormals();
 
+    // Material Fosco de Alta Qualidade (Aparência de Porcelana/Mármore)
     const material = new THREE.MeshStandardMaterial({
-      color: 0xf1f5f9,
-      roughness: 0.35,
+      color: 0xebf1f5,
+      roughness: 0.3,
       metalness: 0.05,
       flatShading: false
     });
@@ -162,11 +200,11 @@ class LithophaneApp {
   }
 
   /**
-   * Fatiador de G-Code otimizado com rampa de profundidade suave.
+   * Fatiador de G-Code Sincronizado com o Algoritmo Volumétrico
    */
   exportGCode() {
     if (!this.loadedImgElement) {
-      alert('Por favor, carregue uma imagem antes de gerar o G-Code.');
+      alert('Atenção: Por favor, carregue uma imagem antes de gerar o arquivo G-Code.');
       return;
     }
 
@@ -178,61 +216,65 @@ class LithophaneApp {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     
-    // Resolução do fatiamento em passos
-    const stepsX = 100;
+    const stepsX = 120;
     const stepsY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * stepsX);
 
     canvas.width = stepsX;
     canvas.height = stepsY;
-    
-    // Aplica o mesmo filtro de suavização para o corte G-Code
-    ctx.filter = 'blur(1.8px) grayscale(100%)';
+    ctx.filter = 'grayscale(100%)';
     ctx.drawImage(this.loadedImgElement, 0, 0, stepsX, stepsY);
+
     const imgData = ctx.getImageData(0, 0, stepsX, stepsY).data;
 
-    let gcode = `; ================================================\n`;
-    gcode += `; G-CODE GENERATED BY LITHOPHANE SLICER V2\n`;
-    gcode += `; Dimensões do Modelo: ${widthMM.toFixed(1)}x${heightMM.toFixed(1)} mm\n`;
-    gcode += `; ================================================\n`;
-    gcode += `M104 S${temp} ; Aquecer bico extrusor\n`;
-    gcode += `M109 S${temp} ; Aguardar estabilização de temperatura\n`;
-    gcode += `G28 ; Home eixos XYZ\n`;
-    gcode += `G90 ; Coordenadas Absolutas\n`;
-    gcode += `M83 ; Extrusão Relativa\n`;
-    gcode += `G1 Z2.0 F3000 ; Posiciona Z de segurança\n\n`;
+    // Análise de Fundo para o Fatiador
+    let totalLum = 0;
+    for (let i = 0; i < imgData.length; i += 16) {
+      totalLum += (0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2]);
+    }
+    const isDarkBackground = (totalLum / (imgData.length / 16)) < 128;
 
-    const feedRate = 1200; // Velocidade de impressão ideal para detalhes
+    let gcode = `; ================================================\n`;
+    gcode += `; G-CODE GENERATED BY BAS-RELIEF SLICER V3\n`;
+    gcode += `; Dimensões: ${widthMM.toFixed(1)}x${heightMM.toFixed(1)} mm\n`;
+    gcode += `; ================================================\n`;
+    gcode += `M104 S${temp} ; Aquecer bico\n`;
+    gcode += `M109 S${temp} ; Estabilizar temperatura\n`;
+    gcode += `G28 ; Home eixos\n`;
+    gcode += `G90 ; Coordenadas absolutas\n`;
+    gcode += `M83 ; Extrusão relativa\n`;
+    gcode += `G1 Z2.0 F3000 ; Elevação de segurança\n\n`;
+
+    const feedRate = 1200;
 
     for (let y = 0; y < stepsY; y++) {
       const yPos = (y / stepsY) * heightMM + 20;
 
       for (let x = 0; x < stepsX; x++) {
-        // Trajetória contínua Zig-Zag
         const actualX = (y % 2 === 0) ? x : (stepsX - 1 - x);
         const xPos = (actualX / stepsX) * widthMM + 20;
 
         const idx = (y * stepsX + actualX) * 4;
-        const brightness = (0.299 * imgData[idx] + 0.587 * imgData[idx+1] + 0.114 * imgData[idx+2]) / 255;
+        const lum = (0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2]) / 255.0;
         
-        let depth = Math.pow(1 - brightness, 1.25);
-        const zPos = depth * maxRelief + 0.4;
+        let val = isDarkBackground ? lum : (1.0 - lum);
+        let shapedVal = Math.sin(val * Math.PI * 0.5);
+        const zPos = shapedVal * maxRelief + 0.5;
 
         gcode += `G1 X${xPos.toFixed(2)} Y${yPos.toFixed(2)} Z${zPos.toFixed(2)} E0.035 F${feedRate}\n`;
       }
     }
 
-    // Encerramento
     gcode += `\n; Encerramento de Impressão\n`;
-    gcode += `G1 E-2.0 F2400 ; Retração de filamento\n`;
-    gcode += `G1 Z${(maxRelief + 10).toFixed(2)} F3000 ; Elevação do bico\n`;
+    gcode += `G1 E-2.0 F2400 ; Retração\n`;
+    gcode += `G1 Z${(maxRelief + 10).toFixed(2)} F3000 ; Elevação Z\n`;
     gcode += `M104 S0 ; Desligar aquecedor\n`;
     gcode += `M84 ; Desativar motores\n`;
 
-    this.downloadFile(gcode, 'lithophane_modelo.gcode', 'text/plain');
+    this.downloadFile(gcode, 'bas_relief_modelo.gcode', 'text/plain');
   }
 
   /**
-   * Força o download de arquivos texto no navegador.
+   * Força o download de arquivos gerados
    */
   downloadFile(content, fileName, contentType) {
     const blob = new Blob([content], { type: contentType });
@@ -244,7 +286,7 @@ class LithophaneApp {
   }
 
   /**
-   * Redimensionamento da janela.
+   * Redimensionamento da Viewport
    */
   onWindowResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -253,7 +295,7 @@ class LithophaneApp {
   }
 
   /**
-   * Loop de renderização contínua.
+   * Loop principal de animação WebGL
    */
   animate() {
     requestAnimationFrame(() => this.animate());
@@ -262,5 +304,5 @@ class LithophaneApp {
   }
 }
 
-// Inicializa o app
+// Inicializa a aplicação
 new LithophaneApp();
