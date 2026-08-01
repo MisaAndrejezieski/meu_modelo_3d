@@ -12,6 +12,7 @@ class CNCPreviewApp {
     this.previewMetadata = null;
     this.currentFile = null;
     this.fileType = null;
+    this.debounceTimer = null;
 
     this.initScene();
     this.initListeners();
@@ -52,10 +53,22 @@ class CNCPreviewApp {
   initListeners() {
     document.getElementById('image-input').addEventListener('change', (event) => this.handleFileInput(event));
     document.getElementById('tool-type').addEventListener('change', () => this.updateStatus());
-    document.getElementById('width-input').addEventListener('input', () => this.updatePreview());
-    document.getElementById('height-slider').addEventListener('input', (event) => this.updateHeightLabel(event));
-    document.getElementById('resolution-input').addEventListener('input', () => this.updatePreview());
-    document.getElementById('depth-input').addEventListener('input', () => this.updatePreview());
+    
+    // Inputs com Debounce para evitar travamentos
+    const debouncedUpdate = () => {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = setTimeout(() => this.updatePreview(), 250);
+    };
+
+    document.getElementById('width-input').addEventListener('input', debouncedUpdate);
+    document.getElementById('resolution-input').addEventListener('input', debouncedUpdate);
+    document.getElementById('depth-input').addEventListener('input', debouncedUpdate);
+    
+    document.getElementById('height-slider').addEventListener('input', (event) => {
+      this.updateHeightLabel(event);
+      debouncedUpdate();
+    });
+
     document.getElementById('spindle-input').addEventListener('input', () => this.updateStatus());
     document.getElementById('feedrate-input').addEventListener('input', () => this.updateStatus());
     document.getElementById('export-gcode-btn').addEventListener('click', () => this.handleExport());
@@ -88,30 +101,35 @@ class CNCPreviewApp {
   async updatePreview() {
     if (!this.currentFile) return;
 
-    this.removeCurrentPreview();
+    try {
+      this.updateStatus('Processando geometria 3D...');
+      this.removeCurrentPreview();
 
-    const widthMm = clamp(parseFloat(document.getElementById('width-input').value) || 120, 20, 450);
-    const maxDepthMm = clamp(parseFloat(document.getElementById('height-slider').value) || 5, 0.5, 25);
-    const resolution = clamp(parseInt(document.getElementById('resolution-input').value, 10) || 128, 32, 256);
-    const cutDepth = clamp(parseFloat(document.getElementById('depth-input').value) || 3, 0.2, 12);
+      const widthMm = clamp(parseFloat(document.getElementById('width-input').value) || 120, 20, 450);
+      const maxDepthMm = clamp(parseFloat(document.getElementById('height-slider').value) || 1.5, 0.2, 10);
+      const resolution = clamp(parseInt(document.getElementById('resolution-input').value, 10) || 128, 32, 256);
+      const cutDepth = clamp(parseFloat(document.getElementById('depth-input').value) || 3, 0.2, 12);
 
-    let result;
-    if (this.fileType === 'svg') {
-      result = await buildSVGPreview(this.currentFile, widthMm, cutDepth);
-    } else {
-      result = await buildRasterPreview(this.currentFile, widthMm, maxDepthMm, resolution);
+      let result;
+      if (this.fileType === 'svg') {
+        result = await buildSVGPreview(this.currentFile, widthMm, cutDepth);
+      } else {
+        result = await buildRasterPreview(this.currentFile, widthMm, maxDepthMm, resolution);
+      }
+
+      this.previewMetadata = result.metadata;
+      this.currentPreview = result.group;
+      this.scene.add(this.currentPreview);
+      this.updateStatus();
+    } catch (error) {
+      console.error('Erro ao atualizar preview:', error);
+      this.updateStatus('Erro ao processar o arquivo. Verifique o formato.');
     }
-
-    this.previewMetadata = result.metadata;
-    this.currentPreview = result.group;
-    this.scene.add(this.currentPreview);
-    this.updateStatus();
   }
 
   updateHeightLabel(event) {
     const value = parseFloat(event.target.value);
     document.getElementById('height-val').textContent = `${formatValue(value, 1)} mm`;
-    this.updatePreview();
   }
 
   updateStatus(message) {
@@ -133,10 +151,10 @@ class CNCPreviewApp {
 
     if (this.fileType === 'svg' && this.previewMetadata) {
       const cutDepth = formatValue(this.previewMetadata.depthMm, 1);
-      details.innerHTML = `Arquivo: <strong>${fileName}</strong><br/>Modo: <strong>Recorte Vetorial</strong><br/>Largura final: <strong>${widthMm} mm</strong><br/>Profundidade de corte: <strong>${cutDepth} mm</strong><br/>Ferramenta: <strong>${toolType}</strong><br/>Avanço: <strong>${feedRate}</strong>`;
+      details.innerHTML = `Arquivo: <strong>${fileName}</strong><br/>Modo: <strong>Recorte Vetorial</strong><br/>Largura final: <strong>${widthMm} mm</strong><br/>Profundidade: <strong>${cutDepth} mm</strong><br/>Ferramenta: <strong>${toolType}</strong><br/>Avanço: <strong>${feedRate}</strong>`;
     } else if (this.previewMetadata) {
       const heightMm = formatValue(this.previewMetadata.maxHeightMm, 1);
-      details.innerHTML = `Arquivo: <strong>${fileName}</strong><br/>Modo: <strong>Relevo 3D</strong><br/>Largura final: <strong>${widthMm} mm</strong><br/>Altura do relevo: <strong>${heightMm} mm</strong><br/>Ferramenta: <strong>${toolType}</strong><br/>Avanço: <strong>${feedRate}</strong>`;
+      details.innerHTML = `Arquivo: <strong>${fileName}</strong><br/>Modo: <strong>Relevo 3D Suave</strong><br/>Largura final: <strong>${widthMm} mm</strong><br/>Altura do relevo: <strong>${heightMm} mm</strong><br/>Ferramenta: <strong>${toolType}</strong><br/>Avanço: <strong>${feedRate}</strong>`;
     } else {
       details.textContent = `Arquivo: ${fileName} carregado — processando preview...`;
     }
@@ -160,36 +178,46 @@ class CNCPreviewApp {
       return;
     }
 
-    const widthMm = clamp(parseFloat(document.getElementById('width-input').value) || 120, 20, 450);
-    const feedRate = clamp(parseFloat(document.getElementById('feedrate-input').value) || 1800, 600, 6000);
-    const laserMode = document.getElementById('tool-type').value === 'laser';
+    try {
+      this.updateStatus('Gerando G-Code profissional...');
+      const widthMm = clamp(parseFloat(document.getElementById('width-input').value) || 120, 20, 450);
+      const feedRate = clamp(parseFloat(document.getElementById('feedrate-input').value) || 1800, 600, 6000);
+      const laserMode = document.getElementById('tool-type').value === 'laser';
 
-    let gcode = '';
-    if (this.fileType === 'svg') {
-      const svgText = await readTextFile(this.currentFile);
-      gcode = generateGcodeForSVG(svgText, {
-        widthMm,
-        feedRate,
-        cutDepth: clamp(parseFloat(document.getElementById('depth-input').value) || 3, 0.2, 12),
-        retractHeight: 5,
-        spindleSpeed: clamp(parseFloat(document.getElementById('spindle-input').value) || 1200, 200, 5000)
-      });
-    } else {
-      const rasterPreview = await buildRasterPreview(this.currentFile, widthMm, clamp(parseFloat(document.getElementById('height-slider').value) || 5, 0.5, 18), clamp(parseInt(document.getElementById('resolution-input').value, 10) || 128, 32, 256));
-      gcode = generateGcodeForRaster({
-        imageData: rasterPreview.metadata.imageData,
-        cols: rasterPreview.metadata.cols,
-        rows: rasterPreview.metadata.rows,
-        widthMm,
-        heightMm: rasterPreview.metadata.heightMm,
-        maxDepthMm: rasterPreview.metadata.maxHeightMm,
-        feedRate,
-        laserMode,
-        laserPower: clamp(parseFloat(document.getElementById('spindle-input').value) || 1200, 200, 5000)
-      });
+      let gcode = '';
+      if (this.fileType === 'svg') {
+        const svgText = await readTextFile(this.currentFile);
+        gcode = generateGcodeForSVG(svgText, {
+          widthMm,
+          feedRate,
+          cutDepth: clamp(parseFloat(document.getElementById('depth-input').value) || 3, 0.2, 12),
+          retractHeight: 5,
+          spindleSpeed: clamp(parseFloat(document.getElementById('spindle-input').value) || 1200, 200, 5000)
+        });
+      } else {
+        const maxDepthMm = clamp(parseFloat(document.getElementById('height-slider').value) || 1.5, 0.2, 10);
+        const resolution = clamp(parseInt(document.getElementById('resolution-input').value, 10) || 128, 32, 256);
+        const rasterPreview = await buildRasterPreview(this.currentFile, widthMm, maxDepthMm, resolution);
+        
+        gcode = generateGcodeForRaster({
+          imageData: rasterPreview.metadata.imageData,
+          cols: rasterPreview.metadata.cols,
+          rows: rasterPreview.metadata.rows,
+          widthMm,
+          heightMm: rasterPreview.metadata.heightMm,
+          maxDepthMm: rasterPreview.metadata.maxHeightMm,
+          feedRate,
+          laserMode,
+          laserPower: clamp(parseFloat(document.getElementById('spindle-input').value) || 1200, 200, 5000)
+        });
+      }
+
+      this.downloadFile(gcode, this.currentFile.name.replace(/\.(svg|png|jpe?g|bmp|webp)$/i, '_cnc.gcode'));
+      this.updateStatus();
+    } catch (error) {
+      console.error('Erro na exportação do G-Code:', error);
+      this.updateStatus('Erro ao gerar o G-Code.');
     }
-
-    this.downloadFile(gcode, this.currentFile.name.replace(/\.(svg|png|jpe?g|bmp|webp)$/i, '_cnc.gcode'));
   }
 
   downloadFile(content, fileName) {
