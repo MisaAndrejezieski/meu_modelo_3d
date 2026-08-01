@@ -51,6 +51,8 @@ Instale as dependências:Bash - npm install
 Inicie o servidor de desenvolvimento:Bash - npm run dev
 Acesse no navegador:Abra o endereço indicado no terminal (normalmente http://localhost:5173).
 
-📐 Como Funciona o Fatiamento Algorítmico (G-Code)O fatiador embutido lê o canal de luminância $Y$ de cada pixel da imagem ajustada:$$Y = 0.299R + 0.587G + 0.114B$$Inversão de Relevo: Zonas mais escuras ($Y \to 0$) resultam em uma camada de plástico mais espessa para bloquear a luz, enquanto zonas claras ($Y \to 1$) geram camadas finas para permitir a passagem de luz.Percurso Zig-Zag: Para evitar movimentações vazias (travel moves), o fatiador alterna a direção de varredura do eixo X a cada linha percorrida do eixo Y.Comandos ISO 6983: A saída gera comandos padrão da indústria (G1 para movimentação com extrusão, M104/M109 para controle de temperatura e G28 para retorno ao ponto de origem).
+📐 Como Funciona o Fatiamento Algorítmico (G-Code)O fatiador embutido lê o canal de luminância Y de cada pixel da imagem ajustada:
+Y = 0.299R + 0.587G + 0.114B
+Inversão de Relevo: Zonas mais escuras (Y \to 0) resultam em uma camada de plástico mais espessa para bloquear a luz, enquanto zonas claras (Y \to 1) geram camadas finas para permitir a passagem de luz.Percurso Zig-Zag: Para evitar movimentações vazias (travel moves), o fatiador alterna a direção de varredura do eixo X a cada linha percorrida do eixo Y.Comandos ISO 6983: A saída gera comandos padrão da indústria (G1 para movimentação com extrusão, M104/M109 para controle de temperatura e G28 para retorno ao ponto de origem).
 
 📜 LicençaEste projeto está sob a licença MIT. Veja o arquivo LICENSE para mais detalhes.
