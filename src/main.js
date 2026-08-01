@@ -4,8 +4,8 @@ import './style.css';
 
 /**
  * @class LithophaneApp
- * @description Classe principal responsável pela renderização WebGL em Three.js,
- * cálculo matricial da imagem e exportação algorítmica para código G-Code (ISO 6983).
+ * @description Aplicação WebGL para geração de Lithophanes e Bas-Relief 3D
+ * com pré-processamento de imagens e fatiador G-Code integrado.
  */
 class LithophaneApp {
   constructor() {
@@ -19,7 +19,7 @@ class LithophaneApp {
   }
 
   /**
-   * Configura o ambiente 3D: Câmera, Iluminação, Renderizador e Grid
+   * Configura o cenário 3D, câmera, renderizador WebGL e iluminação.
    */
   initScene() {
     this.scene = new THREE.Scene();
@@ -31,7 +31,7 @@ class LithophaneApp {
       0.1,
       1000
     );
-    this.camera.position.set(0, -80, 80);
+    this.camera.position.set(0, -90, 90);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -41,27 +41,31 @@ class LithophaneApp {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
 
-    // Iluminação Direcionada e Ambiente
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    dirLight.position.set(50, 50, 100);
+    // Iluminação Triangulada para destacar os relevos do modelo
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    mainLight.position.set(40, -40, 80);
 
-    this.scene.add(ambientLight, dirLight);
+    const fillLight = new THREE.DirectionalLight(0x38bdf8, 0.5);
+    fillLight.position.set(-40, 40, 50);
 
-    // Simulação Visual da Mesa de Impressão (Mesa 200x200 mm)
+    this.scene.add(ambientLight, mainLight, fillLight);
+
+    // Grid para simulação do Bed de Impressão (200x200 mm)
     const gridHelper = new THREE.GridHelper(200, 40, 0x38bdf8, 0x334155);
     gridHelper.rotation.x = Math.PI / 2;
     this.scene.add(gridHelper);
   }
 
   /**
-   * Conecta os componentes da Interface DOM aos métodos da classe
+   * Associa eventos do DOM aos métodos da aplicação.
    */
   initListeners() {
     document.getElementById('image-input').addEventListener('change', (e) => this.handleImageUpload(e));
     
     document.getElementById('height-slider').addEventListener('input', (e) => {
-      document.getElementById('height-val').textContent = `${e.target.value} mm`;
+      document.getElementById('height-val').textContent = `${parseFloat(e.target.value).toFixed(1)} mm`;
       this.generate3DMesh();
     });
 
@@ -72,8 +76,7 @@ class LithophaneApp {
   }
 
   /**
-   * Lê o arquivo de imagem carregado pelo usuário
-   * @param {Event} event Evento de alteração do input do tipo file
+   * Processa o arquivo enviado pelo usuário.
    */
   handleImageUpload(event) {
     const file = event.target.files[0];
@@ -90,12 +93,12 @@ class LithophaneApp {
   }
 
   /**
-   * Processa a matriz de pixels 2D e reconstrói os vértices da malha 3D
+   * Aplica tratamento de imagem via Canvas (Filtros + Blur) e gera a Malha 3D.
    */
   generate3DMesh() {
     if (!this.loadedImgElement) return;
 
-    // Descarta a geometria anterior para evitar vazamento de memória (Memory Leak)
+    // Limpeza de memória (Evita Memory Leaks de geometrias antigas)
     if (this.currentMesh) {
       this.scene.remove(this.currentMesh);
       this.currentMesh.geometry.dispose();
@@ -106,13 +109,20 @@ class LithophaneApp {
     const ctx = canvas.getContext('2d');
 
     const widthMM = parseFloat(document.getElementById('width-input').value) || 80;
-    const resX = 120; // Densidade de resolução da malha
-    const resY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * 120);
+    
+    // Resolução da malha (200 vértices para capturar linhas e detalhes finos)
+    const resX = 200; 
+    const resY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * resX);
     const heightMM = (this.loadedImgElement.height / this.loadedImgElement.width) * widthMM;
 
     canvas.width = resX;
     canvas.height = resY;
+
+    // --- PROCESSAMENTO DE IMAGEM (Suavização para Linearts e Desenhos) ---
+    // Aplica Blur Gaussiano no Canvas antes de ler a altura dos vértices
+    ctx.filter = 'blur(1.8px) grayscale(100%)';
     ctx.drawImage(this.loadedImgElement, 0, 0, resX, resY);
+
     const imgData = ctx.getImageData(0, 0, resX, resY).data;
 
     const geometry = new THREE.PlaneGeometry(widthMM, heightMM, resX - 1, resY - 1);
@@ -124,19 +134,27 @@ class LithophaneApp {
       const g = imgData[i * 4 + 1];
       const b = imgData[i * 4 + 2];
 
-      // Mapeamento de Luminância (Normalização 0.0 - 1.0)
+      // Cálculo da Luminância (Normalizada de 0.0 a 1.0)
       const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
       
-      // Inversão para técnica de Lithophane + Espessura Base de 0.8mm
-      pos.setZ(i, (1 - brightness) * maxZ + 0.8);
+      // Inversão: Linhas escuras elevam o relevo (Bas-Relief)
+      let depth = (1 - brightness);
+
+      // Curva Exponencial: Arredonda os picos para visual escultural
+      depth = Math.pow(depth, 1.25);
+
+      // Aplica a altura final Z + espessura base de 0.6mm
+      pos.setZ(i, depth * maxZ + 0.6);
     }
 
+    // Recalcula as normais para garantir um sombreamento suave das superfícies
     geometry.computeVertexNormals();
 
     const material = new THREE.MeshStandardMaterial({
       color: 0xf1f5f9,
-      roughness: 0.4,
-      metalness: 0.1
+      roughness: 0.35,
+      metalness: 0.05,
+      flatShading: false
     });
 
     this.currentMesh = new THREE.Mesh(geometry, material);
@@ -144,11 +162,11 @@ class LithophaneApp {
   }
 
   /**
-   * Fatiador Algorítmico: Gera as coordenadas de movimentação do extrusor
+   * Fatiador de G-Code otimizado com rampa de profundidade suave.
    */
   exportGCode() {
     if (!this.loadedImgElement) {
-      alert('Atenção: Carregue uma imagem antes de gerar o G-Code.');
+      alert('Por favor, carregue uma imagem antes de gerar o G-Code.');
       return;
     }
 
@@ -159,56 +177,62 @@ class LithophaneApp {
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    const stepsX = 80;
-    const stepsY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * 80);
+    
+    // Resolução do fatiamento em passos
+    const stepsX = 100;
+    const stepsY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * stepsX);
 
     canvas.width = stepsX;
     canvas.height = stepsY;
+    
+    // Aplica o mesmo filtro de suavização para o corte G-Code
+    ctx.filter = 'blur(1.8px) grayscale(100%)';
     ctx.drawImage(this.loadedImgElement, 0, 0, stepsX, stepsY);
     const imgData = ctx.getImageData(0, 0, stepsX, stepsY).data;
 
-    // Cabeçalho de Inicialização G-Code
     let gcode = `; ================================================\n`;
-    gcode += `; GENERATED BY WEBGL LITHOPHANE SLICER\n`;
-    gcode += `; Dimensões: ${widthMM.toFixed(1)}x${heightMM.toFixed(1)} mm\n`;
+    gcode += `; G-CODE GENERATED BY LITHOPHANE SLICER V2\n`;
+    gcode += `; Dimensões do Modelo: ${widthMM.toFixed(1)}x${heightMM.toFixed(1)} mm\n`;
     gcode += `; ================================================\n`;
-    gcode += `M104 S${temp} ; Aquecer bico\n`;
-    gcode += `M109 S${temp} ; Aguardar temperatura alvo\n`;
-    gcode += `G28 ; Home todos os eixos\n`;
-    gcode += `G90 ; Coordenadas absolutas\n`;
-    gcode += `M83 ; Modo de extrusão relativa\n`;
-    gcode += `G1 Z2.0 F3000 ; Eleva bico para segurança\n\n`;
+    gcode += `M104 S${temp} ; Aquecer bico extrusor\n`;
+    gcode += `M109 S${temp} ; Aguardar estabilização de temperatura\n`;
+    gcode += `G28 ; Home eixos XYZ\n`;
+    gcode += `G90 ; Coordenadas Absolutas\n`;
+    gcode += `M83 ; Extrusão Relativa\n`;
+    gcode += `G1 Z2.0 F3000 ; Posiciona Z de segurança\n\n`;
 
-    const feedRate = 1500;
+    const feedRate = 1200; // Velocidade de impressão ideal para detalhes
 
     for (let y = 0; y < stepsY; y++) {
       const yPos = (y / stepsY) * heightMM + 20;
 
       for (let x = 0; x < stepsX; x++) {
-        // Trajetória Contínua (Zig-Zag) para minimizar deslocamento sem extrusão
+        // Trajetória contínua Zig-Zag
         const actualX = (y % 2 === 0) ? x : (stepsX - 1 - x);
         const xPos = (actualX / stepsX) * widthMM + 20;
 
         const idx = (y * stepsX + actualX) * 4;
         const brightness = (0.299 * imgData[idx] + 0.587 * imgData[idx+1] + 0.114 * imgData[idx+2]) / 255;
-        const zPos = (1 - brightness) * maxRelief + 0.4;
+        
+        let depth = Math.pow(1 - brightness, 1.25);
+        const zPos = depth * maxRelief + 0.4;
 
-        gcode += `G1 X${xPos.toFixed(2)} Y${yPos.toFixed(2)} Z${zPos.toFixed(2)} E0.04 F${feedRate}\n`;
+        gcode += `G1 X${xPos.toFixed(2)} Y${yPos.toFixed(2)} Z${zPos.toFixed(2)} E0.035 F${feedRate}\n`;
       }
     }
 
-    // Rodapé de Encerramento G-Code
-    gcode += `\n; Finalização da Impressão\n`;
-    gcode += `G1 E-2.0 F2400 ; Retrair filamento\n`;
-    gcode += `G1 Z${(maxRelief + 15).toFixed(2)} F3000 ; Elevar Z\n`;
-    gcode += `M104 S0 ; Desligar aquecimento\n`;
-    gcode += `M84 ; Desabilitar motores\n`;
+    // Encerramento
+    gcode += `\n; Encerramento de Impressão\n`;
+    gcode += `G1 E-2.0 F2400 ; Retração de filamento\n`;
+    gcode += `G1 Z${(maxRelief + 10).toFixed(2)} F3000 ; Elevação do bico\n`;
+    gcode += `M104 S0 ; Desligar aquecedor\n`;
+    gcode += `M84 ; Desativar motores\n`;
 
     this.downloadFile(gcode, 'lithophane_modelo.gcode', 'text/plain');
   }
 
   /**
-   * Força o download do arquivo gerado no navegador
+   * Força o download de arquivos texto no navegador.
    */
   downloadFile(content, fileName, contentType) {
     const blob = new Blob([content], { type: contentType });
@@ -220,7 +244,7 @@ class LithophaneApp {
   }
 
   /**
-   * Atualiza a proporção da câmera e viewport em redimensionamentos de tela
+   * Redimensionamento da janela.
    */
   onWindowResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -229,7 +253,7 @@ class LithophaneApp {
   }
 
   /**
-   * Loop principal de renderização WebGL
+   * Loop de renderização contínua.
    */
   animate() {
     requestAnimationFrame(() => this.animate());
@@ -238,5 +262,5 @@ class LithophaneApp {
   }
 }
 
-// Inicializa a aplicação
+// Inicializa o app
 new LithophaneApp();
