@@ -1,13 +1,98 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="pt-br">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>meu_modelo_3d</title>
+    <title>Gerador 3D para Impressão</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #1a1a1a;
+        color: #fff;
+      }
+      #canvas-container {
+        width: 100vw;
+        height: 100vh;
+      }
+      #ui-container {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background: rgba(30, 30, 30, 0.85);
+        backdrop-filter: blur(10px);
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        width: 280px;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+      }
+      h2 {
+        margin: 0;
+        font-size: 1.1rem;
+        color: #4facfe;
+      }
+      .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      label {
+        font-size: 0.85rem;
+        color: #ccc;
+      }
+      input[type="file"] {
+        display: none;
+      }
+      .btn {
+        background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+        color: #000;
+        border: none;
+        padding: 10px 15px;
+        border-radius: 6px;
+        font-weight: bold;
+        cursor: pointer;
+        text-align: center;
+        transition: transform 0.1s ease;
+      }
+      .btn:hover {
+        transform: scale(1.02);
+      }
+      .btn-export {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      }
+      input[type="range"] {
+        width: 100%;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+    <div id="canvas-container"></div>
+
+    <div id="ui-container">
+      <h2>Criador 3D (Impressão)</h2>
+      
+      <label for="image-input" class="btn">📂 Carregar Imagem 2D</label>
+      <input type="file" id="image-input" accept="image/*" />
+
+      <div class="control-group">
+        <label for="height-slider">Altura do Relevo (mm): <span id="height-val">5</span></label>
+        <input type="range" id="height-slider" min="1" max="30" value="5" step="0.5" />
+      </div>
+
+      <div class="control-group">
+        <label for="base-slider">Espessura da Base (mm): <span id="base-val">2</span></label>
+        <input type="range" id="base-slider" min="0.5" max="10" value="2" step="0.5" />
+      </div>
+
+      <button id="export-btn" class="btn btn-export">💾 Exportar .STL (Impressão)</button>
+    </div>
+
+    <script type="module" src="/main.js"></script>
   </body>
 </html>
