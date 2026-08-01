@@ -1,25 +1,30 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js';
+import { generateGcodeForRaster, generateGcodeForSVG } from './gcode-generator.js';
+import { buildRasterPreview, buildSVGPreview } from './preview-builder.js';
 import './style.css';
+import { clamp, formatValue, isSVGFile, readTextFile } from './utils.js';
 
-class LithophaneApp {
+class CNCPreviewApp {
   constructor() {
     this.container = document.getElementById('canvas-container');
-    this.currentGroup = null;
-    this.svgLoader = new SVGLoader();
+    this.currentPreview = null;
+    this.previewMetadata = null;
+    this.currentFile = null;
+    this.fileType = null;
 
     this.initScene();
     this.initListeners();
+    this.updateStatus('Aguardando arquivo de entrada...');
     this.animate();
   }
 
   initScene() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0f172a);
+    this.scene.background = new THREE.Color(0x08101d);
 
-    this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    this.camera.position.set(0, -150, 150);
+    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1200);
+    this.camera.position.set(0, -180, 170);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -28,122 +33,172 @@ class LithophaneApp {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    this.controls.target.set(0, 0, 10);
 
-    // Iluminação técnica de alto contraste
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
-    keyLight.position.set(50, -80, 100);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    keyLight.position.set(60, -80, 120);
+    this.scene.add(keyLight);
 
-    this.scene.add(ambientLight, keyLight);
+    const fillLight = new THREE.DirectionalLight(0x98a8ff, 0.4);
+    fillLight.position.set(-40, 60, 100);
+    this.scene.add(fillLight);
 
-    const gridHelper = new THREE.GridHelper(200, 40, 0x38bdf8, 0x334155);
+    const gridHelper = new THREE.GridHelper(400, 40, 0x2c5282, 0x1f2937);
     gridHelper.rotation.x = Math.PI / 2;
     this.scene.add(gridHelper);
   }
 
   initListeners() {
-    const fileInput = document.getElementById('image-input');
-    fileInput.setAttribute('accept', '.svg');
-    
-    fileInput.addEventListener('change', (e) => this.handleFileUpload(e));
-    
-    document.getElementById('height-slider').addEventListener('input', (e) => {
-      document.getElementById('height-val').textContent = `${parseFloat(e.target.value).toFixed(1)} mm`;
-      if (this.lastSvgData) this.build3DFromSVG(this.lastSvgData);
-    });
-
+    document.getElementById('image-input').addEventListener('change', (event) => this.handleFileInput(event));
+    document.getElementById('tool-type').addEventListener('change', () => this.updateStatus());
+    document.getElementById('width-input').addEventListener('input', () => this.updatePreview());
+    document.getElementById('height-slider').addEventListener('input', (event) => this.updateHeightLabel(event));
+    document.getElementById('resolution-input').addEventListener('input', () => this.updatePreview());
+    document.getElementById('depth-input').addEventListener('input', () => this.updatePreview());
+    document.getElementById('spindle-input').addEventListener('input', () => this.updateStatus());
+    document.getElementById('feedrate-input').addEventListener('input', () => this.updateStatus());
+    document.getElementById('export-gcode-btn').addEventListener('click', () => this.handleExport());
     window.addEventListener('resize', () => this.onWindowResize());
   }
 
-  handleFileUpload(event) {
+  async handleFileInput(event) {
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file) {
+      this.updateStatus('Nenhum arquivo selecionado.');
+      return;
+    }
 
-    if (file.name.endsWith('.svg') || file.type === 'image/svg+xml') {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const svgText = e.target.result;
-        const svgData = this.svgLoader.parse(svgText);
-        this.lastSvgData = svgData;
-        this.build3DFromSVG(svgData);
-      };
-      reader.readAsText(file);
+    this.currentFile = file;
+    this.fileType = isSVGFile(file) ? 'svg' : 'raster';
+
+    this.toggleModeControls();
+    await this.updatePreview();
+  }
+
+  toggleModeControls() {
+    const rasterControls = document.querySelectorAll('.raster-only');
+    const vectorControls = document.querySelectorAll('.vector-only');
+    const isSvg = this.fileType === 'svg';
+
+    rasterControls.forEach((element) => element.classList.toggle('hidden', isSvg));
+    vectorControls.forEach((element) => element.classList.toggle('hidden', !isSvg));
+  }
+
+  async updatePreview() {
+    if (!this.currentFile) return;
+
+    this.removeCurrentPreview();
+
+    const widthMm = clamp(parseFloat(document.getElementById('width-input').value) || 120, 20, 450);
+    const maxDepthMm = clamp(parseFloat(document.getElementById('height-slider').value) || 5, 0.5, 25);
+    const resolution = clamp(parseInt(document.getElementById('resolution-input').value, 10) || 128, 32, 256);
+    const cutDepth = clamp(parseFloat(document.getElementById('depth-input').value) || 3, 0.2, 12);
+
+    let result;
+    if (this.fileType === 'svg') {
+      result = await buildSVGPreview(this.currentFile, widthMm, cutDepth);
     } else {
-      alert('Por favor, envie um arquivo .SVG para usinar com precisão!');
+      result = await buildRasterPreview(this.currentFile, widthMm, maxDepthMm, resolution);
+    }
+
+    this.previewMetadata = result.metadata;
+    this.currentPreview = result.group;
+    this.scene.add(this.currentPreview);
+    this.updateStatus();
+  }
+
+  updateHeightLabel(event) {
+    const value = parseFloat(event.target.value);
+    document.getElementById('height-val').textContent = `${formatValue(value, 1)} mm`;
+    this.updatePreview();
+  }
+
+  updateStatus(message) {
+    const details = document.getElementById('status-details');
+    if (message) {
+      details.textContent = message;
+      return;
+    }
+
+    if (!this.currentFile) {
+      details.textContent = 'Nenhum arquivo carregado.';
+      return;
+    }
+
+    const fileName = this.currentFile.name;
+    const toolType = document.getElementById('tool-type').value === 'laser' ? 'Laser' : 'Router CNC';
+    const feedRate = `${parseInt(document.getElementById('feedrate-input').value, 10)} mm/min`;
+    const widthMm = formatValue(parseFloat(document.getElementById('width-input').value) || 120, 1);
+
+    if (this.fileType === 'svg' && this.previewMetadata) {
+      const cutDepth = formatValue(this.previewMetadata.depthMm, 1);
+      details.innerHTML = `Arquivo: <strong>${fileName}</strong><br/>Modo: <strong>Recorte Vetorial</strong><br/>Largura final: <strong>${widthMm} mm</strong><br/>Profundidade de corte: <strong>${cutDepth} mm</strong><br/>Ferramenta: <strong>${toolType}</strong><br/>Avanço: <strong>${feedRate}</strong>`;
+    } else if (this.previewMetadata) {
+      const heightMm = formatValue(this.previewMetadata.maxHeightMm, 1);
+      details.innerHTML = `Arquivo: <strong>${fileName}</strong><br/>Modo: <strong>Relevo 3D</strong><br/>Largura final: <strong>${widthMm} mm</strong><br/>Altura do relevo: <strong>${heightMm} mm</strong><br/>Ferramenta: <strong>${toolType}</strong><br/>Avanço: <strong>${feedRate}</strong>`;
+    } else {
+      details.textContent = `Arquivo: ${fileName} carregado — processando preview...`;
     }
   }
 
-  build3DFromSVG(svgData) {
-    if (this.currentGroup) {
-      this.scene.remove(this.currentGroup);
-      this.currentGroup.traverse((child) => {
-        if (child.isMesh) {
-          child.geometry.dispose();
-          child.material.dispose();
-        }
+  removeCurrentPreview() {
+    if (!this.currentPreview) return;
+    this.scene.remove(this.currentPreview);
+    this.currentPreview.traverse((child) => {
+      if (child.isMesh) {
+        child.geometry.dispose();
+        child.material.dispose();
+      }
+    });
+    this.currentPreview = null;
+  }
+
+  async handleExport() {
+    if (!this.currentFile) {
+      alert('Carregue uma imagem ou SVG antes de gerar o G-Code.');
+      return;
+    }
+
+    const widthMm = clamp(parseFloat(document.getElementById('width-input').value) || 120, 20, 450);
+    const feedRate = clamp(parseFloat(document.getElementById('feedrate-input').value) || 1800, 600, 6000);
+    const laserMode = document.getElementById('tool-type').value === 'laser';
+
+    let gcode = '';
+    if (this.fileType === 'svg') {
+      const svgText = await readTextFile(this.currentFile);
+      gcode = generateGcodeForSVG(svgText, {
+        widthMm,
+        feedRate,
+        cutDepth: clamp(parseFloat(document.getElementById('depth-input').value) || 3, 0.2, 12),
+        retractHeight: 5,
+        spindleSpeed: clamp(parseFloat(document.getElementById('spindle-input').value) || 1200, 200, 5000)
+      });
+    } else {
+      const rasterPreview = await buildRasterPreview(this.currentFile, widthMm, clamp(parseFloat(document.getElementById('height-slider').value) || 5, 0.5, 18), clamp(parseInt(document.getElementById('resolution-input').value, 10) || 128, 32, 256));
+      gcode = generateGcodeForRaster({
+        imageData: rasterPreview.metadata.imageData,
+        cols: rasterPreview.metadata.cols,
+        rows: rasterPreview.metadata.rows,
+        widthMm,
+        heightMm: rasterPreview.metadata.heightMm,
+        maxDepthMm: rasterPreview.metadata.maxHeightMm,
+        feedRate,
+        laserMode,
+        laserPower: clamp(parseFloat(document.getElementById('spindle-input').value) || 1200, 200, 5000)
       });
     }
 
-    const depth = parseFloat(document.getElementById('height-slider').value) || 6;
-    const group = new THREE.Group();
-    const paths = svgData.paths;
+    this.downloadFile(gcode, this.currentFile.name.replace(/\.(svg|png|jpe?g|bmp|webp)$/i, '_cnc.gcode'));
+  }
 
-    // Material com acabamento usinado limpo
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      roughness: 0.2,
-      metalness: 0.1,
-      side: THREE.DoubleSide
-    });
-
-    paths.forEach((path) => {
-      const shapes = SVGLoader.createShapes(path);
-
-      shapes.forEach((shape) => {
-        // Configuração de extrusão nítida sem arredondamentos excessivos
-        const extrudeSettings = {
-          depth: depth,
-          bevelEnabled: true,
-          bevelSegments: 2,
-          steps: 1,
-          bevelSize: 0.2,
-          bevelThickness: 0.2
-        };
-
-        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-        const mesh = new THREE.Mesh(geometry, material);
-        group.add(mesh);
-      });
-    });
-
-    // Centralizar e normalizar o tamanho da peça automaticamente na cena
-    const box = new THREE.Box3().setFromObject(group);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-
-    // Ajusta a escala para não estourar os limites da visualização (máximo 100mm)
-    const maxDim = Math.max(size.x, size.y);
-    const scale = maxDim > 0 ? 100 / maxDim : 1;
-
-    group.scale.set(scale, -scale, 1); // Inverte Y do SVG
-    group.position.x = -center.x * scale;
-    group.position.y = center.y * scale;
-    group.position.z = 0;
-
-    // Criar Base Plana Ajustada ao Vetor
-    const baseWidth = (size.x * scale) + 20;
-    const baseHeight = (size.y * scale) + 20;
-    const baseGeo = new THREE.BoxGeometry(baseWidth, baseHeight, 2);
-    const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 });
-    const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-    baseMesh.position.set(0, 0, -1);
-
-    const masterGroup = new THREE.Group();
-    masterGroup.add(baseMesh);
-    masterGroup.add(group);
-
-    this.currentGroup = masterGroup;
-    this.scene.add(this.currentGroup);
+  downloadFile(content, fileName) {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(link.href);
   }
 
   onWindowResize() {
@@ -159,4 +214,4 @@ class LithophaneApp {
   }
 }
 
-new LithophaneApp();
+new CNCPreviewApp();

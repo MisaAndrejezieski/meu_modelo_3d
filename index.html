@@ -9,157 +9,7 @@
     <meta name="description" content="Ferramenta WebGL para conversão de imagens 2D em modelos 3D (Lithophanes) e fatiamento direto para G-Code para impressão 3D." />
     <meta name="author" content="Seu Nome" />
 
-    <style>
-      :root {
-        --bg-color: #0f172a;
-        --card-bg: rgba(30, 41, 59, 0.85);
-        --accent-color: #38bdf8;
-        --accent-hover: #0284c7;
-        --danger-color: #f43f5e;
-        --text-main: #f8fafc;
-        --text-muted: #94a3b8;
-        --border-color: rgba(255, 255, 255, 0.1);
-      }
-
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
-
-      body {
-        overflow: hidden;
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        background-color: var(--bg-color);
-        color: var(--text-main);
-      }
-
-      #canvas-container {
-        width: 100vw;
-        height: 100vh;
-        position: absolute;
-        top: 0;
-        left: 0;
-        z-index: 1;
-      }
-
-      /* Painel de Controle Principal (Glassmorphism) */
-      #ui-container {
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        z-index: 10;
-        width: 320px;
-        background: var(--card-bg);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        padding: 24px;
-        border-radius: 16px;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-        border: 1px solid var(--border-color);
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-      }
-
-      .header-title {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      h1 {
-        font-size: 1.25rem;
-        font-weight: 700;
-        color: var(--accent-color);
-      }
-
-      p.subtitle {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-      }
-
-      .control-group {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      label {
-        font-size: 0.8rem;
-        font-weight: 600;
-        color: var(--text-main);
-        display: flex;
-        justify-content: space-between;
-      }
-
-      span.val-indicator {
-        color: var(--accent-color);
-      }
-
-      /* Estilização de Inputs */
-      input[type="number"], input[type="range"] {
-        width: 100%;
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px solid var(--border-color);
-        color: var(--text-main);
-        padding: 8px 12px;
-        border-radius: 8px;
-        font-size: 0.85rem;
-        outline: none;
-        transition: border-color 0.2s;
-      }
-
-      input[type="number"]:focus {
-        border-color: var(--accent-color);
-      }
-
-      input[type="file"] {
-        display: none;
-      }
-
-      /* Botões */
-      .btn {
-        width: 100%;
-        background: var(--accent-color);
-        color: #0f172a;
-        border: none;
-        padding: 12px;
-        border-radius: 8px;
-        font-weight: 600;
-        font-size: 0.85rem;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        transition: all 0.2s ease;
-      }
-
-      .btn:hover {
-        background: var(--accent-hover);
-        color: #fff;
-      }
-
-      .btn-gcode {
-        background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
-        color: #fff;
-        margin-top: 8px;
-      }
-
-      .btn-gcode:hover {
-        opacity: 0.9;
-      }
-
-      /* Footer / Info do Autor */
-      .footer-info {
-        font-size: 0.7rem;
-        text-align: center;
-        color: var(--text-muted);
-        border-top: 1px solid var(--border-color);
-        padding-top: 12px;
-      }
-    </style>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <!-- Viewport do Three.js -->
@@ -174,259 +24,64 @@
 
       <!-- Seletor de Arquivo -->
       <label for="image-input" class="btn">
-        📷 Carregar Imagem 2D
+        � Selecionar Imagem ou SVG
       </label>
-      <input type="file" id="image-input" accept="image/*" />
+      <input type="file" id="image-input" accept="image/*,.svg" />
 
-      <!-- Configurações de Dimensão -->
       <div class="control-group">
-        <label for="width-input">Largura no Bed (mm):</label>
-        <input type="number" id="width-input" value="80" min="20" max="250" />
+        <label for="tool-type">Ferramenta:</label>
+        <select id="tool-type">
+          <option value="router">Router CNC</option>
+          <option value="laser">Laser</option>
+        </select>
       </div>
 
       <div class="control-group">
+        <label for="width-input">Largura da peça (mm):</label>
+        <input type="number" id="width-input" value="120" min="20" max="450" step="5" />
+      </div>
+
+      <div class="control-group raster-only">
         <label for="height-slider">
-          Altura do Relevo: <span id="height-val" class="val-indicator">3.0 mm</span>
+          Altura do relevo: <span id="height-val" class="val-indicator">5.0 mm</span>
         </label>
-        <input type="range" id="height-slider" min="0.5" max="8" value="3.0" step="0.1" />
+        <input type="range" id="height-slider" min="0.5" max="18" value="5.0" step="0.5" />
+      </div>
+
+      <div class="control-group raster-only">
+        <label for="resolution-input">Resolução de preview:</label>
+        <input type="range" id="resolution-input" min="32" max="256" value="128" step="8" />
+      </div>
+
+      <div class="control-group vector-only hidden">
+        <label for="depth-input">Profundidade de corte (mm):</label>
+        <input type="number" id="depth-input" value="3" min="0.2" max="12" step="0.2" />
+      </div>
+
+      <div class="control-group vector-only hidden">
+        <label for="spindle-input">Velocidade spindle / laser (S):</label>
+        <input type="number" id="spindle-input" value="1200" min="200" max="5000" step="50" />
       </div>
 
       <div class="control-group">
-        <label for="temp-input">Temp. Bico (°C):</label>
-        <input type="number" id="temp-input" value="200" min="180" max="280" />
+        <label for="feedrate-input">Velocidade de avanço (mm/min):</label>
+        <input type="number" id="feedrate-input" value="1800" min="600" max="6000" step="100" />
       </div>
 
-      <!-- Ações de Exportação -->
       <button id="export-gcode-btn" class="btn btn-gcode">
-        ⚡ Fatiar & Gerar G-Code
+        ⚡ Gerar G-Code Profissional
       </button>
 
-      <footer class="footer-info">
-        Desenvolvido com Three.js & Vanilla JS
-      </footer>
+      <div id="status-panel" class="status-panel">
+        <strong>Status:</strong>
+        <div id="status-details">Nenhum arquivo carregado.</div>
+      </div>
+
+      <div class="footer-info">
+        Projeto profissional para CNC Router e Laser com geração de G-Code em tempo real.
+      </div>
     </main>
 
-    <!-- Aplicação Principal (ECMAScript Modules) -->
-    <script type="module">
-      import * as THREE from 'three';
-      import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-
-      /**
-       * @class LithophaneApp
-       * @description Gerencia a cena Three.js, o processamento da imagem e o fatiamento em G-Code.
-       */
-      class LithophaneApp {
-        constructor() {
-          this.container = document.getElementById('canvas-container');
-          this.loadedImgElement = null;
-          this.currentMesh = null;
-
-          this.initScene();
-          this.initListeners();
-          this.animate();
-        }
-
-        /** Inicializa a cena 3D, câmera, renderizador e iluminação */
-        initScene() {
-          this.scene = new THREE.Scene();
-          this.scene.background = new THREE.Color(0x0f172a);
-
-          this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-          this.camera.position.set(0, -80, 80);
-
-          this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-          this.renderer.setSize(window.innerWidth, window.innerHeight);
-          this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-          this.container.appendChild(this.renderer.domElement);
-
-          this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-          this.controls.enableDamping = true;
-
-          // Luz Iluminação Dinâmica
-          const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-          const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-          dirLight.position.set(50, 50, 100);
-
-          this.scene.add(ambientLight, dirLight);
-
-          // Grid de referência (Mesa de Impressão)
-          const gridHelper = new THREE.GridHelper(200, 40, 0x38bdf8, 0x334155);
-          gridHelper.rotation.x = Math.PI / 2;
-          this.scene.add(gridHelper);
-        }
-
-        /** Associa os eventos de UI aos métodos da aplicação */
-        initListeners() {
-          document.getElementById('image-input').addEventListener('change', (e) => this.handleImageUpload(e));
-          document.getElementById('height-slider').addEventListener('input', (e) => {
-            document.getElementById('height-val').textContent = `${e.target.value} mm`;
-            this.generate3DMesh();
-          });
-          document.getElementById('width-input').addEventListener('change', () => this.generate3DMesh());
-          document.getElementById('export-gcode-btn').addEventListener('click', () => this.exportGCode());
-
-          window.addEventListener('resize', () => this.onWindowResize());
-        }
-
-        /** Carrega a imagem enviada pelo usuário */
-        handleImageUpload(event) {
-          const file = event.target.files[0];
-          if (!file) return;
-
-          const url = URL.createObjectURL(file);
-          const img = new Image();
-          img.onload = () => {
-            this.loadedImgElement = img;
-            this.generate3DMesh();
-            URL.revokeObjectURL(url);
-          };
-          img.src = url;
-        }
-
-        /**
-         * Mapeia os pixels da imagem para elevação Z no Three.js
-         * Algoritmo baseado no cálculo de luminância em escala de cinza
-         */
-        generate3DMesh() {
-          if (!this.loadedImgElement) return;
-
-          if (this.currentMesh) {
-            this.scene.remove(this.currentMesh);
-            this.currentMesh.geometry.dispose();
-            this.currentMesh.material.dispose();
-          }
-
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          const widthMM = parseFloat(document.getElementById('width-input').value) || 80;
-          const heightMM = (this.loadedImgElement.height / this.loadedImgElement.width) * widthMM;
-
-          const resX = 120; // Resolução de malha
-          const resY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * 120);
-
-          canvas.width = resX;
-          canvas.height = resY;
-          ctx.drawImage(this.loadedImgElement, 0, 0, resX, resY);
-          const imgData = ctx.getImageData(0, 0, resX, resY).data;
-
-          const geometry = new THREE.PlaneGeometry(widthMM, heightMM, resX - 1, resY - 1);
-          const pos = geometry.attributes.position;
-          const maxZ = parseFloat(document.getElementById('height-slider').value);
-
-          for (let i = 0; i < pos.count; i++) {
-            const r = imgData[i * 4];
-            const g = imgData[i * 4 + 1];
-            const b = imgData[i * 4 + 2];
-
-            // Fórmula padrão ITU-R BT.601 para conversão de cor para luminância
-            const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-            
-            // Inverte para que tons escuros fiquem mais altos (Lithophane) + base de 0.8mm
-            pos.setZ(i, (1 - brightness) * maxZ + 0.8);
-          }
-
-          geometry.computeVertexNormals();
-
-          const material = new THREE.MeshStandardMaterial({
-            color: 0xf1f5f9,
-            roughness: 0.4,
-            metalness: 0.1
-          });
-
-          this.currentMesh = new THREE.Mesh(geometry, material);
-          this.scene.add(this.currentMesh);
-        }
-
-        /**
-         * Fatiador Algorítmico: Mapeia o vetor 3D e gera instruções G-Code (ISO 6983)
-         */
-        exportGCode() {
-          if (!this.loadedImgElement) {
-            alert('Atenção: Carregue uma imagem antes de gerar o G-Code.');
-            return;
-          }
-
-          const temp = document.getElementById('temp-input').value || 200;
-          const widthMM = parseFloat(document.getElementById('width-input').value) || 80;
-          const heightMM = (this.loadedImgElement.height / this.loadedImgElement.width) * widthMM;
-          const maxRelief = parseFloat(document.getElementById('height-slider').value);
-
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          const stepsX = 80; // Passos de resolução no corte da ferramenta
-          const stepsY = Math.round((this.loadedImgElement.height / this.loadedImgElement.width) * 80);
-
-          canvas.width = stepsX;
-          canvas.height = stepsY;
-          ctx.drawImage(this.loadedImgElement, 0, 0, stepsX, stepsY);
-          const imgData = ctx.getImageData(0, 0, stepsX, stepsY).data;
-
-          // Construção do comando G-Code
-          let gcode = `; ================================================\n`;
-          gcode += `; GENERATED BY WEBGL LITHOPHANE SLICER\n`;
-          gcode += `; Dimensões: ${widthMM.toFixed(1)}x${heightMM.toFixed(1)} mm\n`;
-          gcode += `; ================================================\n`;
-          gcode += `M104 S${temp} ; Aquecer bico\n`;
-          gcode += `M109 S${temp} ; Aguardar temperatura alvo\n`;
-          gcode += `G28 ; Home todas as eixos\n`;
-          gcode += `G90 ; Coordenadas absolutas\n`;
-          gcode += `M83 ; Modo de extrusão relativa\n`;
-          gcode += `G1 Z2.0 F3000 ; Posição de segurança\n\n`;
-
-          const feedRate = 1500; // Velocidade em mm/min
-
-          for (let y = 0; y < stepsY; y++) {
-            const yPos = (y / stepsY) * heightMM + 20;
-
-            for (let x = 0; x < stepsX; x++) {
-              // Padrão de rastreamento zig-zag para eficiência de trajetória
-              const actualX = (y % 2 === 0) ? x : (stepsX - 1 - x);
-              const xPos = (actualX / stepsX) * widthMM + 20;
-
-              const idx = (y * stepsX + actualX) * 4;
-              const brightness = (0.299 * imgData[idx] + 0.587 * imgData[idx+1] + 0.114 * imgData[idx+2]) / 255;
-              const zPos = (1 - brightness) * maxRelief + 0.4;
-
-              gcode += `G1 X${xPos.toFixed(2)} Y${yPos.toFixed(2)} Z${zPos.toFixed(2)} E0.04 F${feedRate}\n`;
-            }
-          }
-
-          // Script de Finalização de Impressão
-          gcode += `\n; Script de Finalização\n`;
-          gcode += `G1 E-2.0 F2400 ; Retrair filamento\n`;
-          gcode += `G1 Z${(maxRelief + 15).toFixed(2)} F3000 ; Elevar Z\n`;
-          gcode += `M104 S0 ; Desligar aquecimento\n`;
-          gcode += `M84 ; Desabilitar motores\n`;
-
-          this.downloadFile(gcode, 'modelo_fatiado.gcode', 'text/plain');
-        }
-
-        /** Método Utilitário para acionar download via Blob */
-        downloadFile(content, fileName, contentType) {
-          const blob = new Blob([content], { type: contentType });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = fileName;
-          a.click();
-          URL.revokeObjectURL(a.href);
-        }
-
-        onWindowResize() {
-          this.camera.aspect = window.innerWidth / window.innerHeight;
-          this.camera.updateProjectionMatrix();
-          this.renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        animate() {
-          requestAnimationFrame(() => this.animate());
-          this.controls.update();
-          this.renderer.render(this.scene, this.camera);
-        }
-      }
-
-      // Inicialização da Aplicação Web
-      new LithophaneApp();
-    </script>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>
