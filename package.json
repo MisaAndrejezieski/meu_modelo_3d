@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "potrace-wasm": "^1.0.4",
+    "three": "^0.185.1"
+  }
+}
