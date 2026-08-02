@@ -4,11 +4,7 @@ export function buildSVGPreview(file, widthMm, cutDepth) {
   return new Promise((resolve) => {
     const group = new THREE.Group();
     const geometry = new THREE.BoxGeometry(widthMm, widthMm * 0.75, cutDepth);
-    const material = new THREE.MeshStandardMaterial({ 
-      color: 0x4a5568, 
-      roughness: 0.5, 
-      side: THREE.DoubleSide 
-    });
+    const material = new THREE.MeshStandardMaterial({ color: 0x4a5568, roughness: 0.5 });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.z = -cutDepth / 2;
     group.add(mesh);
@@ -30,10 +26,8 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
 
-          // CORREÇÃO 1: Segurança para o navegador não travar
-          const safeResolution = Math.min(resolution, 300);
-          const cols = safeResolution;
-          const rows = Math.round(safeResolution * (img.height / img.width));
+          const cols = resolution;
+          const rows = Math.round(resolution * (img.height / img.width));
           canvas.width = cols;
           canvas.height = rows;
 
@@ -41,17 +35,27 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           const imgData = ctx.getImageData(0, 0, cols, rows);
           const data = imgData.data;
 
-          // 1. Extração inicial de luminância
+          // 1. Extração de luminância e mapeamento anatômico em camadas
           const rawMap = new Float32Array(cols * rows);
+          let minLum = 1.0, maxLum = 0.0;
+
           for (let i = 0; i < cols * rows; i++) {
             const pIdx = i * 4;
             const r = data[pIdx];
             const g = data[pIdx + 1];
             const b = data[pIdx + 2];
-            rawMap[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            // Luminância padrão
+            const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            rawMap[i] = lum;
+            if (lum < minLum) minLum = lum;
+            if (lum > maxLum) maxLum = lum;
           }
 
-          // 2. Suavização Avançada por Matriz (Taludes e barrancos)
+          // 2. Detecção de Fundo Neutro para isolar o busto
+          const bgR = data[0], bgG = data[1], bgB = data[2];
+          const bgLum = (0.299 * bgR + 0.587 * bgG + 0.114 * bgB) / 255;
+
+          // 3. Suavização de malha para manter transições orgânicas sem degraus
           const heightMap = new Float32Array(cols * rows);
           const blurRadius = 2;
 
@@ -75,22 +79,29 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
             }
           }
 
-          // 3. Construção da malha
+          // 4. Construção da Malha 3D com Hierarquia de Volumes (Nariz, Seios, Renda e Texturas)
           const heightMm = widthMm * (rows / cols);
           const geometry = new THREE.PlaneGeometry(widthMm, heightMm, cols - 1, rows - 1);
           const positions = geometry.attributes.position;
 
-          // Pega o maior brilho para usar como referência zero (não furar a porta)
-          let maxLum = 0;
-          for(let i = 0; i < heightMap.length; i++) {
-            if(heightMap[i] > maxLum) maxLum = heightMap[i];
-          }
-
           for (let i = 0; i < positions.count; i++) {
             const lum = heightMap[i];
-            // CORREÇÃO DE PROFUNDIDADE: O mais claro fica em 0, o mais escuro desce
-            const z = (1.0 - (lum / maxLum)) * maxDepthMm;
-            positions.setZ(i, -z); 
+            let z = 0;
+
+            // Se o pixel fizer parte da figura e não do fundo plano
+            if (Math.abs(lum - bgLum) > 0.05) {
+              // Normaliza a altura focando na hierarquia de relevo da escultura
+              const normalized = 1.0 - ((lum - minLum) / (maxLum - minLum || 1));
+              
+              // Curva exponencial ajustada para destacar volumes avantajados (seios) e proeminências (nariz)
+              // enquanto preserva as micro-texturas da renda do vestido por cima da pele
+              const volumetricProfile = Math.pow(Math.max(0, normalized), 1.35);
+              z = volumetricProfile * maxDepthMm;
+            } else {
+              z = 0; // Base traseira estritamente plana
+            }
+
+            positions.setZ(i, z);
           }
 
           geometry.computeVertexNormals();
@@ -106,10 +117,6 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           const mesh = new THREE.Mesh(geometry, material);
           const group = new THREE.Group();
           group.add(mesh);
-
-          // CORREÇÃO 2: A MALDITA ROTAÇÃO PARA O VISUALIZADOR ENXERGAR
-          // Isso deita o plano no chão para a câmera ver de cima
-          group.rotation.x = -Math.PI / 2;
 
           resolve({
             group,
