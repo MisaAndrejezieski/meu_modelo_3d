@@ -35,19 +35,16 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           const imgData = ctx.getImageData(0, 0, cols, rows);
           const data = imgData.data;
 
-          // 1. Mapeamento direto de luminância (igual ao gerador clássico)
           const heightMap = new Float32Array(cols * rows);
           for (let i = 0; i < cols * rows; i++) {
             const pIdx = i * 4;
             const r = data[pIdx];
             const g = data[pIdx + 1];
             const b = data[pIdx + 2];
-            // Luminância padrão invertida: áreas escuras afundam ou sobem de acordo com o relevo desejado
             const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
             heightMap[i] = lum;
           }
 
-          // 2. Construção da malha 3D com proporção direta de altura
           const heightMm = widthMm * (rows / cols);
           const geometry = new THREE.PlaneGeometry(widthMm, heightMm, cols - 1, rows - 1);
           const positions = geometry.attributes.position;
@@ -55,8 +52,8 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           for (let i = 0; i < positions.count; i++) {
             const lum = heightMap[i];
             
-            // Altura proporcional contínua baseada no tom de cinza, garantindo todo o volume orgânico
-            const z = (1.0 - lum) * maxDepthMm;
+            // Correção de inversão: aqui o volume projeta para cima (positivo) em vez de cratera
+            const z = lum * maxDepthMm;
 
             positions.setZ(i, z);
           }
@@ -64,7 +61,7 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           geometry.computeVertexNormals();
 
           const material = new THREE.MeshStandardMaterial({
-            color: 0x1d4ed8, // Tom azulado semelhante ao visualizador clássico
+            color: 0x1d4ed8,
             roughness: 0.3,
             metalness: 0.1,
             side: THREE.DoubleSide,
