@@ -4,7 +4,11 @@ export function buildSVGPreview(file, widthMm, cutDepth) {
   return new Promise((resolve) => {
     const group = new THREE.Group();
     const geometry = new THREE.BoxGeometry(widthMm, widthMm * 0.75, cutDepth);
-    const material = new THREE.MeshStandardMaterial({ color: 0x4a5568, roughness: 0.5 });
+    const material = new THREE.MeshStandardMaterial({ 
+      color: 0x4a5568, 
+      roughness: 0.5, 
+      side: THREE.DoubleSide 
+    });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.z = -cutDepth / 2;
     group.add(mesh);
@@ -51,10 +55,7 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
 
           for (let i = 0; i < positions.count; i++) {
             const lum = heightMap[i];
-            
-            // Inversão correta: o que era buraco vira volume saltado para cima (positivo)
             const z = (1.0 - lum) * maxDepthMm;
-
             positions.setZ(i, z);
           }
 
