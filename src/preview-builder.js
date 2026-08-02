@@ -35,46 +35,28 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           const imgData = ctx.getImageData(0, 0, cols, rows);
           const data = imgData.data;
 
-          // 1. Extração de Luminância Avançada para Anatomia e Volumes
+          // 1. Mapeamento direto de luminância (igual ao gerador clássico)
           const heightMap = new Float32Array(cols * rows);
-          let minVal = 255, maxVal = 0;
-
           for (let i = 0; i < cols * rows; i++) {
             const pIdx = i * 4;
             const r = data[pIdx];
             const g = data[pIdx + 1];
             const b = data[pIdx + 2];
-            // Conversão ponderada para destacar sombras e luzes da escultura 3D
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            heightMap[i] = gray;
-            if (gray < minVal) minVal = gray;
-            if (gray > maxVal) maxVal = gray;
+            // Luminância padrão invertida: áreas escuras afundam ou sobem de acordo com o relevo desejado
+            const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            heightMap[i] = lum;
           }
 
-          // 2. Normalização e Detecção de Fundo Neutro
-          // Identifica a cor predominante do fundo para isolar a peça perfeitamente
-          const bgR = data[0], bgG = data[1], bgB = data[2];
-          const bgGray = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
-
+          // 2. Construção da malha 3D com proporção direta de altura
           const heightMm = widthMm * (rows / cols);
           const geometry = new THREE.PlaneGeometry(widthMm, heightMm, cols - 1, rows - 1);
           const positions = geometry.attributes.position;
 
           for (let i = 0; i < positions.count; i++) {
-            const gray = heightMap[i];
-            let z = 0;
-
-            // Se o pixel difere significativamente do fundo, ele pertence ao modelo 3D
-            if (Math.abs(gray - bgGray) > 12) {
-              // Normaliza a altura com foco em preservar as curvas suaves da pele e busto
-              const normalized = (gray - minVal) / (maxVal - minVal || 1);
-              
-              // Perfil cúbico refinado para dar densidade e relevo encorpado à escultura
-              const organicProfile = Math.pow(normalized, 1.4);
-              z = organicProfile * maxDepthMm;
-            } else {
-              z = 0; // Base estritamente plana no eixo zero
-            }
+            const lum = heightMap[i];
+            
+            // Altura proporcional contínua baseada no tom de cinza, garantindo todo o volume orgânico
+            const z = (1.0 - lum) * maxDepthMm;
 
             positions.setZ(i, z);
           }
@@ -82,9 +64,9 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           geometry.computeVertexNormals();
 
           const material = new THREE.MeshStandardMaterial({
-            color: 0xd69e2e,
+            color: 0x1d4ed8, // Tom azulado semelhante ao visualizador clássico
             roughness: 0.3,
-            metalness: 0.05,
+            metalness: 0.1,
             side: THREE.DoubleSide,
             flatShading: false
           });
