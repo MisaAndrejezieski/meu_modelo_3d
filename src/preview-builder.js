@@ -1,124 +1,83 @@
-import * as THREE from 'three';
+// ... (Seu código anterior com o buildRasterPreview e a suavização avançada) ...
 
-export function buildSVGPreview(file, widthMm, cutDepth) {
-  return new Promise((resolve) => {
-    const group = new THREE.Group();
-    const geometry = new THREE.BoxGeometry(widthMm, widthMm * 0.75, cutDepth);
-    const material = new THREE.MeshStandardMaterial({ 
-      color: 0x4a5568, 
-      roughness: 0.5, 
-      side: THREE.DoubleSide 
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.z = -cutDepth / 2;
-    group.add(mesh);
+// NOVA FUNÇÃO: Transformar a malha 3D em Caminho de Fresa e G-Code
+export function generateLithophaneGCode(previewGroup, widthMm, heightMm, maxDepthMm, toolDiameterMm, stepOverPercent) {
+  // 1. Extrair a geometria do grupo Three.js
+  const mesh = previewGroup.children[0];
+  const positions = mesh.geometry.attributes.position;
+  const cols = mesh.geometry.parameters.widthSegments + 1;
+  const rows = mesh.geometry.parameters.heightSegments + 1;
 
-    resolve({
-      group,
-      metadata: { depthMm: cutDepth }
-    });
-  });
+  // 2. Definir parâmetros de usinagem
+  const toolRadius = toolDiameterMm / 2;
+  const stepOver = toolDiameterMm * (stepOverPercent / 100); // Ex: 10% de passo
+  const clearanceZ = 5; // Altura segura para andar sem bater na peça
+  const plungeFeed = 300; // Velocidade de descida (mm/min)
+  const cutFeed = 1200;   // Velocidade de corte (mm/min)
+
+  let gcode = [];
+  gcode.push("G90 (Modo Absoluto)");
+  gcode.push("G21 (Unidades em mm)");
+  gcode.push(`G0 Z${clearanceZ}`);
+  gcode.push(`G0 X0 Y0`);
+
+  // 3. Algoritmo de Passe de Acabamento (Scallop pass - estilo "Tecido")
+  // A CNC não pode entrar na profundidade máxima de uma vez, ou a fresa quebra.
+  // Fazemos cortes em camadas (Z-Levels).
+
+  // Vamos varrer a peça de cima para baixo (Y), linha por linha
+  for (let yRow = 0; yRow < rows; yRow += stepOver / (heightMm / (rows - 1))) {
+    const yIndex = Math.round(yRow);
+    if (yIndex >= rows) break;
+
+    // Descobre a altura máxima (Z) nessa linha Y para não colidir com a parede
+    let maxZAtThisY = 0;
+    for (let xCol = 0; xCol < cols; xCol++) {
+      const idx = yIndex * cols + xCol;
+      const z = positions.getZ(idx);
+      if (z > maxZAtThisY) maxZAtThisY = z;
+    }
+    
+    // Movimento de entrada na peça
+    gcode.push(`G0 Z${clearanceZ}`);
+    gcode.push(`G0 X0 Y${(yIndex / (rows - 1)) * heightMm}`);
+    gcode.push(`G1 Z${maxZAtThisY - toolRadius} F${plungeFeed}`); // Desce lentamente até a altura daquela linha
+
+    // Varrer o eixo X de acordo com a profundidade da linha atual
+    let cuttingDirection = 1; // 1 para esquerda->direita, -1 para direita->esquerda
+    let currentX = 0;
+    let xStep = stepOver / (widthMm / (cols - 1));
+    
+    // A cada X, a fresa deve descer/subir suavemente (isso cria o barranco)
+    while (currentX < cols) {
+      const idx = yIndex * cols + Math.round(currentX);
+      const targetZ = positions.getZ(idx) - toolRadius; // Ajuste do raio da fresa
+
+      // A MÁGICA DO TECIDO: Movimento contínuo de descida/subida no eixo Z
+      gcode.push(`G1 X${(Math.round(currentX) / (cols - 1)) * widthMm} Z${targetZ} F${cutFeed}`);
+      
+      currentX += xStep;
+    }
+    
+    // Fim da linha, sobe a fresa e volta para o próximo passo Y
+    gcode.push(`G0 Z${clearanceZ}`);
+  }
+
+  // Finalizar
+  gcode.push("G0 Z50");
+  gcode.push("M30 (Fim do programa)");
+
+  return gcode.join("\n");
 }
 
-export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          const cols = resolution;
-          const rows = Math.round(resolution * (img.height / img.width));
-          canvas.width = cols;
-          canvas.height = rows;
-
-          ctx.drawImage(img, 0, 0, cols, rows);
-          const imgData = ctx.getImageData(0, 0, cols, rows);
-          const data = imgData.data;
-
-          // 1. Extração inicial de luminância
-          const rawMap = new Float32Array(cols * rows);
-          for (let i = 0; i < cols * rows; i++) {
-            const pIdx = i * 4;
-            const r = data[pIdx];
-            const g = data[pIdx + 1];
-            const b = data[pIdx + 2];
-            rawMap[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-          }
-
-          // 2. Suavização Avançada por Matriz (Criação de taludes e rampas progressivas nas bordas)
-          // Isso elimina as paredes de 90° e transforma as transições em barrancos moldados
-          const heightMap = new Float32Array(cols * rows);
-          const blurRadius = 2; // Raio do talude (aumente ou diminua para ajustar a suavidade da rampa)
-
-          for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-              let sum = 0;
-              let weightSum = 0;
-
-              for (let ky = -blurRadius; ky <= blurRadius; ky++) {
-                for (let kx = -blurRadius; kx <= blurRadius; kx++) {
-                  const nx = x + kx;
-                  const ny = y + ky;
-                  if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
-                    // Ponderação baseada na distância para garantir transição orgânica tipo tecido
-                    const weight = 1 / (1 + Math.abs(kx) + Math.abs(ky));
-                    sum += rawMap[ny * cols + nx] * weight;
-                    weightSum += weight;
-                  }
-                }
-              }
-              heightMap[y * cols + x] = sum / weightSum;
-            }
-          }
-
-          // 3. Construção da malha com relevo moldado em rampa contínua
-          const heightMm = widthMm * (rows / cols);
-          const geometry = new THREE.PlaneGeometry(widthMm, heightMm, cols - 1, rows - 1);
-          const positions = geometry.attributes.position;
-
-          for (let i = 0; i < positions.count; i++) {
-            const lum = heightMap[i];
-            // Mapeamento proporcional para que o relevo suba de forma fluida a partir da base
-            const z = (1.0 - lum) * maxDepthMm;
-            positions.setZ(i, z);
-          }
-
-          geometry.computeVertexNormals();
-
-          const material = new THREE.MeshStandardMaterial({
-            color: 0x1d4ed8,
-            roughness: 0.3,
-            metalness: 0.1,
-            side: THREE.DoubleSide,
-            flatShading: false
-          });
-
-          const mesh = new THREE.Mesh(geometry, material);
-          const group = new THREE.Group();
-          group.add(mesh);
-
-          resolve({
-            group,
-            metadata: {
-              imageData: data,
-              cols,
-              rows,
-              heightMm,
-              maxHeightMm: maxDepthMm
-            }
-          });
-        } catch (err) {
-          reject(err);
-        }
-      };
-      img.onerror = reject;
-      img.src = event.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
+// EXEMPLO DE USO:
+// Supondo que você já tenha o previewGroup do seu código:
+// const gcodeStr = generateLithophaneGCode(
+//    previewGroup, 
+//    200,        // Largura da porta (mm)
+//    150,        // Altura da porta (mm)
+//    3,          // Profundidade máxima (mm) - NÃO FURE A PORTA
+//    3.175,      // Diâmetro da sua fresa esférica (1/8")
+//    10          // 10% de sobreposição da fresa
+// );
+// console.log(gcodeStr); // Copie isso e salve como arquivo .nc ou .tap
