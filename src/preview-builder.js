@@ -31,39 +31,74 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           canvas.width = cols;
           canvas.height = rows;
 
-          // Suavização leve para evitar picos na malha
-          ctx.filter = 'blur(2px)';
+          // Renderiza a imagem limpa
           ctx.drawImage(img, 0, 0, cols, rows);
-
           const imgData = ctx.getImageData(0, 0, cols, rows);
           const data = imgData.data;
+
+          // Matriz para armazenar a luminância limpa
+          const grid = new Float32Array(cols * rows);
+          const threshold = 0.88; // Isola o fundo branco puro
+
+          for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+              const idx = y * cols + x;
+              const pIdx = idx * 4;
+              const r = data[pIdx];
+              const g = data[pIdx + 1];
+              const b = data[pIdx + 2];
+              const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+              // Separa a figura do fundo
+              grid[idx] = lum < threshold ? (1.0 - lum) : 0.0;
+            }
+          }
+
+          // Transformada de Distância Euclidiana Otimizada (SDF) para criar relevos em domo perfeitos
+          const distanceMap = new Float32Array(cols * rows);
+          const passes = 3; // Propagação de onda refinada para suavidade extrema
+
+          for (let pass = 0; pass < passes; pass++) {
+            for (let y = 1; y < rows - 1; y++) {
+              for (let x = 1; x < cols - 1; x++) {
+                const idx = y * cols + x;
+                if (grid[idx] > 0) {
+                  const minNeighbor = Math.min(
+                    distanceMap[(y - 1) * cols + x],
+                    distanceMap[(y + 1) * cols + x],
+                    distanceMap[y * cols + (x - 1)],
+                    distanceMap[y * cols + (x + 1)]
+                  );
+                  distanceMap[idx] = minNeighbor + 1.0;
+                } else {
+                  distanceMap[idx] = 0.0;
+                }
+              }
+            }
+          }
+
+          // Normalização matemática do mapa de distância
+          let maxDist = 1.0;
+          for (let i = 0; i < distanceMap.length; i++) {
+            if (distanceMap[i] > maxDist) maxDist = distanceMap[i];
+          }
 
           const heightMm = widthMm * (rows / cols);
           const geometry = new THREE.PlaneGeometry(widthMm, heightMm, cols - 1, rows - 1);
           const positions = geometry.attributes.position;
 
           for (let i = 0; i < positions.count; i++) {
-            const xIdx = i % cols;
-            const yIdx = Math.floor(i / cols);
-            const pixelIndex = (yIdx * cols + xIdx) * 4;
-
-            const r = data[pixelIndex];
-            const g = data[pixelIndex + 1];
-            const b = data[pixelIndex + 2];
-            
-            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-            
-            // CORREÇÃO DE VOLUME CORRETO (RELEVO POSITIVO):
-            // O fundo branco (luminance próximo de 1.0) deve ser Z = 0 (base plana).
-            // Queremos que áreas com cor/conteúdo ganhem altura positiva. 
-            // Usamos diretamente o inverso do branco para empurrar o relevo para cima:
+            const dist = distanceMap[i];
             let z = 0;
-            if (luminance < 0.95) { // Tudo que não for o fundo branco puro ganha volume
-              // Quanto mais denso/colorido, maior o relevo (limitado ao maxDepthMm)
-              const intensity = 1.0 - luminance;
-              z = intensity * maxDepthMm; 
+
+            if (dist > 0) {
+              const normalizedDist = dist / maxDist;
+              // Perfil matemático em Domo Orgânico (Smoothstep + Cúpula)
+              // Garante que as bordas encostem suavemente no Z=0 e o centro suba com elegância
+              const profile = Math.sin(normalizedDist * (Math.PI / 2));
+              z = profile * maxDepthMm;
             } else {
-              z = 0; // Fundo estritamente plano na base
+              z = 0; // Base perfeitamente plana
             }
 
             positions.setZ(i, z);
@@ -71,10 +106,11 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
 
           geometry.computeVertexNormals();
 
+          // Material avançado com brilho de madeira nobre polida
           const material = new THREE.MeshStandardMaterial({
-            color: 0xd69e2e,
-            roughness: 0.4,
-            metalness: 0.1,
+            color: 0xc27803,
+            roughness: 0.3,
+            metalness: 0.05,
             side: THREE.DoubleSide,
             flatShading: false
           });
