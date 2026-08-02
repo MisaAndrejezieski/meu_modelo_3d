@@ -31,74 +31,37 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           canvas.width = cols;
           canvas.height = rows;
 
-          // Renderiza a imagem limpa
+          // Desenha a imagem limpa
           ctx.drawImage(img, 0, 0, cols, rows);
           const imgData = ctx.getImageData(0, 0, cols, rows);
           const data = imgData.data;
-
-          // Matriz para armazenar a luminância limpa
-          const grid = new Float32Array(cols * rows);
-          const threshold = 0.88; // Isola o fundo branco puro
-
-          for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-              const idx = y * cols + x;
-              const pIdx = idx * 4;
-              const r = data[pIdx];
-              const g = data[pIdx + 1];
-              const b = data[pIdx + 2];
-              const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-              // Separa a figura do fundo
-              grid[idx] = lum < threshold ? (1.0 - lum) : 0.0;
-            }
-          }
-
-          // Transformada de Distância Euclidiana Otimizada (SDF) para criar relevos em domo perfeitos
-          const distanceMap = new Float32Array(cols * rows);
-          const passes = 3; // Propagação de onda refinada para suavidade extrema
-
-          for (let pass = 0; pass < passes; pass++) {
-            for (let y = 1; y < rows - 1; y++) {
-              for (let x = 1; x < cols - 1; x++) {
-                const idx = y * cols + x;
-                if (grid[idx] > 0) {
-                  const minNeighbor = Math.min(
-                    distanceMap[(y - 1) * cols + x],
-                    distanceMap[(y + 1) * cols + x],
-                    distanceMap[y * cols + (x - 1)],
-                    distanceMap[y * cols + (x + 1)]
-                  );
-                  distanceMap[idx] = minNeighbor + 1.0;
-                } else {
-                  distanceMap[idx] = 0.0;
-                }
-              }
-            }
-          }
-
-          // Normalização matemática do mapa de distância
-          let maxDist = 1.0;
-          for (let i = 0; i < distanceMap.length; i++) {
-            if (distanceMap[i] > maxDist) maxDist = distanceMap[i];
-          }
 
           const heightMm = widthMm * (rows / cols);
           const geometry = new THREE.PlaneGeometry(widthMm, heightMm, cols - 1, rows - 1);
           const positions = geometry.attributes.position;
 
           for (let i = 0; i < positions.count; i++) {
-            const dist = distanceMap[i];
+            const xIdx = i % cols;
+            const yIdx = Math.floor(i / cols);
+            const pixelIndex = (yIdx * cols + xIdx) * 4;
+
+            const r = data[pixelIndex];
+            const g = data[pixelIndex + 1];
+            const b = data[pixelIndex + 2];
+            
+            // Calcula a luminância (0 a 1)
+            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            
             let z = 0;
 
-            if (dist > 0) {
-              const normalizedDist = dist / maxDist;
-              // Perfil matemático em Domo Orgânico (Smoothstep + Cúpula)
-              // Garante que as bordas encostem suavemente no Z=0 e o centro suba com elegância
-              const profile = Math.sin(normalizedDist * (Math.PI / 2));
-              z = profile * maxDepthMm;
+            // Se o pixel não for o fundo branco puro (ex: < 0.98), ele ganha relevo proporcional
+            if (luminance < 0.98) {
+              // Inverte a luminância: quanto mais escuro/denso o traço ou sombra, maior o volume
+              // Usamos uma curva suave (Power) para dar volume encorpado à peça
+              const intensity = 1.0 - luminance;
+              z = Math.pow(intensity, 0.8) * maxDepthMm;
             } else {
-              z = 0; // Base perfeitamente plana
+              z = 0; // Fundo branco absoluto fica perfeitamente plano na base
             }
 
             positions.setZ(i, z);
@@ -106,10 +69,10 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
 
           geometry.computeVertexNormals();
 
-          // Material avançado com brilho de madeira nobre polida
+          // Material refinado com tom de madeira nobre
           const material = new THREE.MeshStandardMaterial({
             color: 0xc27803,
-            roughness: 0.3,
+            roughness: 0.35,
             metalness: 0.05,
             side: THREE.DoubleSide,
             flatShading: false
