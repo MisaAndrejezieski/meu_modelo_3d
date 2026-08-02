@@ -31,35 +31,23 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
           canvas.width = cols;
           canvas.height = rows;
 
-          // ============================================================
-          // PASSO 1: DETECÇÃO AUTOMÁTICA DE FUNDO
-          // ============================================================
-          // Desenha e analisa a imagem para encontrar o fundo dominante
           ctx.drawImage(img, 0, 0, cols, rows);
           const imgData = ctx.getImageData(0, 0, cols, rows);
           const data = imgData.data;
 
-          // Mapeia a luminância de cada pixel
+          // 1. Extração e Normalização de Luminância
           const lumMap = new Float32Array(cols * rows);
-          let maxLum = 0;
-          let minLum = 1;
-
           for (let i = 0; i < cols * rows; i++) {
             const pIdx = i * 4;
             const r = data[pIdx];
             const g = data[pIdx + 1];
             const b = data[pIdx + 2];
+            // Luminância padrão invertida para que áreas escuras/traços ganhem altura
             const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
             lumMap[i] = lum;
-            if (lum > maxLum) maxLum = lum;
-            if (lum < minLum) minLum = lum;
           }
 
-          // ============================================================
-          // PASSO 2: BINARIZAÇÃO COM OTSU - THRESHOLD ADAPTATIVO
-          // ============================================================
-          // Encontra o melhor limiar para separar figura do fundo
-          // Usando o método de Otsu (análise de histograma)
+          // 2. Limiar Adaptativo Automático (Otsu) para isolar o fundo da peça
           const hist = new Array(256).fill(0);
           for (let i = 0; i < cols * rows; i++) {
             const val = Math.floor(lumMap[i] * 255);
@@ -95,101 +83,46 @@ export function buildRasterPreview(file, widthMm, maxDepthMm, resolution) {
 
           const otsuThreshold = threshold / 255;
 
-          // Matriz binária: 1 = figura, 0 = fundo
-          const binaryMap = new Float32Array(cols * rows);
-          for (let i = 0; i < cols * rows; i++) {
-            binaryMap[i] = lumMap[i] < otsuThreshold ? 1.0 : 0.0;
-          }
-
-          // ============================================================
-          // PASSO 3: PREENCHIMENTO DE FUROS (Flood Fill / Closing)
-          // ============================================================
-          // Remove pequenos buracos internos (como olhos, bocas, etc)
-          const closedMap = new Float32Array(binaryMap);
-          
-          // Passada de dilatação (preenche buracos pequenos)
-          const kernelSize = Math.max(1, Math.floor(Math.min(cols, rows) / 200));
-          for (let iter = 0; iter < 2; iter++) {
-            const temp = new Float32Array(closedMap);
-            for (let y = kernelSize; y < rows - kernelSize; y++) {
-              for (let x = kernelSize; x < cols - kernelSize; x++) {
-                const idx = y * cols + x;
-                let sum = 0;
-                let count = 0;
-                for (let ky = -kernelSize; ky <= kernelSize; ky++) {
-                  for (let kx = -kernelSize; kx <= kernelSize; kx++) {
-                    sum += temp[(y + ky) * cols + (x + kx)];
+          // 3. Suavização Gaussiana leve para eliminar texturas barulhentas (como rendas) 
+          // preservando os volumes anatômicos e letras cursivas
+          const smoothMap = new Float32Array(cols * rows);
+          const radius = 1;
+          for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+              let sumVal = 0;
+              let count = 0;
+              for (let ky = -radius; ky <= radius; ky++) {
+                for (let kx = -radius; kx <= radius; kx++) {
+                  const nx = x + kx;
+                  const ny = y + ky;
+                  if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
+                    sumVal += lumMap[ny * cols + nx];
                     count++;
                   }
                 }
-                closedMap[idx] = sum / count > 0.5 ? 1.0 : 0.0;
               }
+              smoothMap[y * cols + x] = sumVal / count;
             }
           }
 
-          // ============================================================
-          // PASSO 4: TRANSFORMADA DE DISTÂNCIA EUCLIDIANA (SDF)
-          // ============================================================
-          const distMap = new Float32Array(cols * rows);
-          const INF = 1e9;
-
-          for (let i = 0; i < cols * rows; i++) {
-            distMap[i] = closedMap[i] === 0 ? 0 : INF;
-          }
-
-          // Passada Forward
-          for (let y = 0; y < rows; y++) {
-            for (let x = 0; x < cols; x++) {
-              const idx = y * cols + x;
-              if (closedMap[idx] > 0) {
-                let d = distMap[idx];
-                if (x > 0) d = Math.min(d, distMap[y * cols + (x - 1)] + 1);
-                if (y > 0) d = Math.min(d, distMap[(y - 1) * cols + x] + 1);
-                if (x > 0 && y > 0) d = Math.min(d, distMap[(y - 1) * cols + (x - 1)] + 1.414);
-                if (x < cols - 1 && y > 0) d = Math.min(d, distMap[(y - 1) * cols + (x + 1)] + 1.414);
-                distMap[idx] = d;
-              }
-            }
-          }
-
-          // Passada Backward
-          for (let y = rows - 1; y >= 0; y--) {
-            for (let x = cols - 1; x >= 0; x--) {
-              const idx = y * cols + x;
-              if (closedMap[idx] > 0) {
-                let d = distMap[idx];
-                if (x < cols - 1) d = Math.min(d, distMap[y * cols + (x + 1)] + 1);
-                if (y < rows - 1) d = Math.min(d, distMap[(y + 1) * cols + x] + 1);
-                if (x < cols - 1 && y < rows - 1) d = Math.min(d, distMap[(y + 1) * cols + (x + 1)] + 1.414);
-                if (x > 0 && y < rows - 1) d = Math.min(d, distMap[(y + 1) * cols + (x - 1)] + 1.414);
-                distMap[idx] = d;
-              }
-            }
-          }
-
-          let maxDist = 1.0;
-          for (let i = 0; i < cols * rows; i++) {
-            if (distMap[i] > maxDist && distMap[i] < INF) maxDist = distMap[i];
-          }
-
-          // ============================================================
-          // PASSO 5: CONSTRUÇÃO DA MALHA 3D
-          // ============================================================
+          // 4. Construção da Malha 3D Híbrida (Anatomia + Cursivas + Base Plana)
           const heightMm = widthMm * (rows / cols);
           const geometry = new THREE.PlaneGeometry(widthMm, heightMm, cols - 1, rows - 1);
           const positions = geometry.attributes.position;
 
           for (let i = 0; i < positions.count; i++) {
-            const dist = distMap[i];
+            const lum = smoothMap[i];
             let z = 0;
 
-            if (dist > 0 && dist < INF) {
-              const t = Math.min(1.0, dist / maxDist);
-              // Perfil suave em domo para volumes orgânicos
-              const profile = Math.pow(Math.sin(t * Math.PI / 2), 0.9);
+            // Se o pixel estiver abaixo do limiar de fundo (ou seja, faz parte do desenho/texto)
+            if (lum < (otsuThreshold * 0.98)) {
+              // Intensidade proporcional baseada no sombreamento interno da arte
+              const intensity = 1.0 - (lum / otsuThreshold);
+              // Curva exponencial balanceada para dar volume orgânico às curvas e nitidez às letras
+              const profile = Math.pow(Math.max(0, intensity), 1.2);
               z = profile * maxDepthMm;
             } else {
-              z = 0;
+              z = 0; // Fundo estritamente plano na base zero
             }
 
             positions.setZ(i, z);
